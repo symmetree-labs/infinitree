@@ -59,7 +59,7 @@ jobs:
       run: |
         cargo login ${{ secrets.CARGO_REGISTRY_TOKEN }}
         for i in infinitree-macros infinitree; do
-          while ! (cd $i; cargo publish -v); do
+          while ! (cd $i; cargo publish -v --no-verify); do
             sleep 30
           done
         done
