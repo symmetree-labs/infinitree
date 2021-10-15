@@ -41,7 +41,7 @@ serde_derive = "1.0"
 secrecy = "0.8"
 zeroize = "^1"
 
-infinitree-macros = { path = "../infinitree-macros"}
+infinitree-macros = { version = "0.1.0", path = "../infinitree-macros" }
 
 rusoto_core = { version="0.47", default_features=false, features=["rustls"], optional = true }
 rusoto_s3 = { version="0.47", default_features=false, features=["rustls"], optional = true }
