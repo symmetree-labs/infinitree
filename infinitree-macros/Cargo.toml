@@ -1,7 +1,11 @@
 [package]
-edition = "2018"
 name = "infinitree-macros"
 version = "0.1.0"
+homepage = "https://symmetree.dev"
+authors = ["Peter Parkanyi <p@symmetree.dev>"]
+repository = "https://github.com/symmetree-labs/infinitree"
+license = "MIT OR Apache-2.0"
+edition= "2018"
 
 [dependencies]
 proc-macro-crate = "1.0.0"
