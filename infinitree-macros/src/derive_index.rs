@@ -80,9 +80,9 @@ pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 
             Ok(quote! {
 		#[inline]
-                pub fn #method_name(&'_ self) -> #infinitree_crate::fields::Access<Box<#strategy<#field_ty>>> {
-		    use #infinitree_crate::fields::{Access, Strategy};
-		    Access::new(
+                pub fn #method_name(&'_ self) -> #infinitree_crate::fields::Intent<Box<#strategy<#field_ty>>> {
+		    use #infinitree_crate::fields::{Intent, Strategy};
+		    Intent::new(
 			#field_name_str,
 			Box::new(#strategy::for_field(
 			    &self.#field_name,
@@ -125,11 +125,11 @@ pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 
 
         impl #infinitree_crate::Index for #impl_generics #st_name #ty_generics #where_clause {
-            fn store_all(&'_ mut self) -> #infinitree_crate::anyhow::Result<Vec<#infinitree_crate::fields::Access<Box<dyn #infinitree_crate::fields::Store>>>> {
+            fn store_all(&'_ mut self) -> #infinitree_crate::anyhow::Result<Vec<#infinitree_crate::fields::Intent<Box<dyn #infinitree_crate::fields::Store>>>> {
                 Ok(vec![#strategies])
             }
 
-            fn load_all(&'_ mut self) -> #infinitree_crate::anyhow::Result<Vec<#infinitree_crate::fields::Access<Box<dyn #infinitree_crate::fields::Load>>>> {
+            fn load_all(&'_ mut self) -> #infinitree_crate::anyhow::Result<Vec<#infinitree_crate::fields::Intent<Box<dyn #infinitree_crate::fields::Load>>>> {
                 Ok(vec![#strategies])
             }
         }

@@ -104,7 +104,7 @@ pub trait Load {
 
 impl<K, T> Load for T
 where
-    T: Select<Key = K>,
+    T: Query<Key = K>,
 {
     #[inline(always)]
     fn load(
@@ -113,7 +113,7 @@ where
         object: &mut dyn object::Reader,
         transaction_list: TransactionList,
     ) {
-        Select::select(self, reader, object, transaction_list, |_| {
+        Query::select(self, reader, object, transaction_list, |_| {
             QueryAction::Take
         })
     }
@@ -123,7 +123,7 @@ where
 ///
 /// This trait should be implemented on a type that also implements
 /// [`Strategy`], and _not_ on the field directly.
-pub trait Select {
+pub trait Query {
     /// The key that the predicate will use to decide whether to pull
     /// more data into memory.
     type Key;
@@ -246,7 +246,7 @@ impl TransactionResolver for FirstOnly {
 /// types when accessing the index field.
 #[non_exhaustive]
 #[derive(Clone)]
-pub struct Access<T> {
+pub struct Intent<T> {
     /// The stringy name of the field that's being accessed. This MUST
     /// be unique within the index.
     pub name: String,
@@ -255,32 +255,32 @@ pub struct Access<T> {
     pub strategy: T,
 }
 
-impl<T> Access<T> {
+impl<T> Intent<T> {
     /// Create a new wrapper that binds a stringy field name to an
     /// access strategy
     #[inline(always)]
     pub fn new(name: impl AsRef<str>, strategy: T) -> Self {
-        Access {
+        Intent {
             name: name.as_ref().to_string(),
             strategy,
         }
     }
 }
 
-impl<T: Store + 'static> From<Access<Box<T>>> for Access<Box<dyn Store>> {
+impl<T: Store + 'static> From<Intent<Box<T>>> for Intent<Box<dyn Store>> {
     #[inline(always)]
-    fn from(a: Access<Box<T>>) -> Self {
-        Access {
+    fn from(a: Intent<Box<T>>) -> Self {
+        Intent {
             name: a.name,
             strategy: a.strategy as Box<dyn Store>,
         }
     }
 }
 
-impl<T: Load + 'static> From<Access<Box<T>>> for Access<Box<dyn Load>> {
+impl<T: Load + 'static> From<Intent<Box<T>>> for Intent<Box<dyn Load>> {
     #[inline(always)]
-    fn from(a: Access<Box<T>>) -> Self {
-        Access {
+    fn from(a: Intent<Box<T>>) -> Self {
+        Intent {
             name: a.name,
             strategy: a.strategy as Box<dyn Load>,
         }
@@ -325,7 +325,7 @@ impl<T: Send + Sync + Clone> Strategy<T> for LocalField<T> {
     }
 }
 
-impl<'iter, T> Select for T
+impl<'iter, T> Query for T
 where
     T: Collection,
 {

@@ -49,9 +49,9 @@ mod tests {
         #[automatically_derived]
         impl TestStruct {
             #[inline]
-            pub fn unattributed(&'_ self) -> ::infinitree::fields::Access<Box<::infinitree::fields::LocalField<ChunkIndex>>> {
-                use ::infinitree::fields::{Access, Strategy};
-                Access::new(
+            pub fn unattributed(&'_ self) -> ::infinitree::fields::Intent<Box<::infinitree::fields::LocalField<ChunkIndex>>> {
+                use ::infinitree::fields::{Intent, Strategy};
+                Intent::new(
                     "unattributed",
                     Box::new(::infinitree::fields::LocalField::for_field(
 			&self.unattributed,
@@ -59,9 +59,9 @@ mod tests {
                 )
             }
             #[inline]
-            pub fn renamed_chunks(&'_ self) -> ::infinitree::fields::Access<Box<::infinitree::fields::LocalField<ChunkIndex>>> {
-                use ::infinitree::fields::{Access, Strategy};
-                Access::new(
+            pub fn renamed_chunks(&'_ self) -> ::infinitree::fields::Intent<Box<::infinitree::fields::LocalField<ChunkIndex>>> {
+                use ::infinitree::fields::{Intent, Strategy};
+                Intent::new(
                     "renamed_chunks",
                     Box::new(::infinitree::fields::LocalField::for_field(
 			&self.chunks,
@@ -69,9 +69,9 @@ mod tests {
                 )
             }
             #[inline]
-            pub fn strategizing(&'_ self) -> ::infinitree::fields::Access<Box<infinitree::fields::SparseField<ChunkIndex>>> {
-                use ::infinitree::fields::{Access, Strategy};
-                Access::new(
+            pub fn strategizing(&'_ self) -> ::infinitree::fields::Intent<Box<infinitree::fields::SparseField<ChunkIndex>>> {
+                use ::infinitree::fields::{Intent, Strategy};
+                Intent::new(
                     "strategizing",
                     Box::new(infinitree::fields::SparseField::for_field(
                         &self.strategizing,
@@ -86,14 +86,14 @@ mod tests {
             }
         }
         impl ::infinitree::Index for TestStruct {
-            fn store_all(&'_ mut self) -> ::infinitree::anyhow::Result<Vec<::infinitree::fields::Access<Box<dyn ::infinitree::fields::Store>>>> {
+            fn store_all(&'_ mut self) -> ::infinitree::anyhow::Result<Vec<::infinitree::fields::Intent<Box<dyn ::infinitree::fields::Store>>>> {
                 Ok(vec![
                     self.unattributed().into(),
                     self.renamed_chunks().into(),
                     self.strategizing().into(),
                 ])
             }
-            fn load_all(&'_ mut self) -> ::infinitree::anyhow::Result<Vec<::infinitree::fields::Access<Box<dyn ::infinitree::fields::Load>>>> {
+            fn load_all(&'_ mut self) -> ::infinitree::anyhow::Result<Vec<::infinitree::fields::Intent<Box<dyn ::infinitree::fields::Load>>>> {
                 Ok(vec![
                     self.unattributed().into(),
                     self.renamed_chunks().into(),

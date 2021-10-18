@@ -53,12 +53,12 @@ pub trait Index: Send + Sync {
     /// Generate an [`Access`] wrapper for each field in the `Index`.
     ///
     /// You should normally use the [`Index`](derive@crate::Index) derive macro to generate this.
-    fn store_all(&mut self) -> anyhow::Result<Vec<Access<Box<dyn Store>>>>;
+    fn store_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Store>>>>;
 
     /// Generate an [`Access`] wrapper for each field in the `Index`.
     ///
     /// You should normally use the [`Index`](derive@crate::Index) derive macro to generate this.
-    fn load_all(&mut self) -> anyhow::Result<Vec<Access<Box<dyn Load>>>>;
+    fn load_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Load>>>>;
 }
 
 /// Allows serializing individual records of an infinite collection.
@@ -133,7 +133,7 @@ pub(crate) trait IndexExt: Index {
         &self,
         index: &'indexwriter mut Writer,
         object: &mut dyn crate::object::Writer,
-        field: &mut Access<Box<dyn Store>>,
+        field: &mut Intent<Box<dyn Store>>,
     ) -> ObjectId {
         let mut tr = index.transaction(&field.name);
 
@@ -147,7 +147,7 @@ pub(crate) trait IndexExt: Index {
         commits_for_field: TransactionList,
         index: &Reader,
         object: &mut dyn crate::object::Reader,
-        field: &mut Access<Box<dyn Load>>,
+        field: &mut Intent<Box<dyn Load>>,
     ) {
         field.strategy.load(index, object, commits_for_field);
     }
@@ -157,7 +157,7 @@ pub(crate) trait IndexExt: Index {
         commits_for_field: TransactionList,
         index: &Reader,
         object: &mut dyn crate::object::Reader,
-        mut field: Access<Box<impl Select<Key = K>>>,
+        mut field: Intent<Box<impl Query<Key = K>>>,
         pred: impl Fn(&K) -> QueryAction,
     ) {
         field

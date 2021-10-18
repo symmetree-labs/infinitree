@@ -1,6 +1,6 @@
 use crate::{
     fields::{
-        self, Access, Collection, Load, QueryAction, QueryIteratorOwned, Select, Serialized, Store,
+        self, Collection, Intent, Load, Query, QueryAction, QueryIteratorOwned, Serialized, Store,
         TransactionResolver,
     },
     index::{self, Generation, Index, IndexExt, TransactionList},
@@ -139,7 +139,7 @@ impl<I: Index> Infinitree<I> {
         Ok(())
     }
 
-    pub fn store(&self, field: impl Into<Access<Box<dyn Store>>>) -> Result<ObjectId> {
+    pub fn store(&self, field: impl Into<Intent<Box<dyn Store>>>) -> Result<ObjectId> {
         let mut field = field.into();
         let start_object = self.store_start_object(&field.name);
 
@@ -150,7 +150,7 @@ impl<I: Index> Infinitree<I> {
         ))
     }
 
-    pub fn load(&self, field: impl Into<Access<Box<dyn Load>>>) -> Result<()> {
+    pub fn load(&self, field: impl Into<Intent<Box<dyn Load>>>) -> Result<()> {
         let mut field = field.into();
         let commits_for_field = self.field_for_version(&field.name);
 
@@ -165,7 +165,7 @@ impl<I: Index> Infinitree<I> {
 
     pub fn select<K>(
         &self,
-        mut field: Access<Box<impl Select<Key = K>>>,
+        mut field: Intent<Box<impl Query<Key = K>>>,
         pred: impl Fn(&K) -> QueryAction,
     ) -> Result<()> {
         let commits_for_field = self.field_for_version(&field.name);
@@ -182,7 +182,7 @@ impl<I: Index> Infinitree<I> {
 
     pub fn query<K, O, Q>(
         &self,
-        mut field: Access<Box<Q>>,
+        mut field: Intent<Box<Q>>,
         pred: impl Fn(&K) -> QueryAction + 'static,
     ) -> Result<impl Iterator<Item = O> + '_>
     where
