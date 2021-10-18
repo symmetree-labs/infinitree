@@ -7,7 +7,11 @@ mod directory;
 pub use directory::Directory;
 
 #[cfg(feature = "s3")]
-pub mod s3;
+mod s3;
+#[cfg(feature = "s3")]
+pub use s3::Cache;
+#[cfg(feature = "s3")]
+pub use s3::InMemoryS3;
 
 #[derive(thiserror::Error, Debug)]
 pub enum BackendError {

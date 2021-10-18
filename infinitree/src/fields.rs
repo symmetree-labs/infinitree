@@ -17,7 +17,7 @@
 //! To learn more about index internals, see the module documentation
 //! in the [`index`](super) module.
 
-use super::{reader, writer, FieldReader, FieldWriter, TransactionList};
+use crate::index::{reader, writer, FieldReader, FieldWriter, TransactionList};
 use crate::object;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{cmp::Eq, hash::Hash, sync::Arc};

@@ -1,10 +1,9 @@
 use crate::{
-    index::{
-        self,
-        fields::{self, QueryIteratorOwned, Serialized},
-        Access, Collection, Generation, Index, IndexExt, Load, QueryAction, Select, Store,
-        TransactionList, TransactionResolver,
+    fields::{
+        self, Access, Collection, Load, QueryAction, QueryIteratorOwned, Select, Serialized, Store,
+        TransactionResolver,
     },
+    index::{self, Generation, Index, IndexExt, TransactionList},
     object::{AEADReader, AEADWriter},
     Backend, Key, ObjectId,
 };

@@ -37,7 +37,7 @@ mod tests {
             _unreferenced: ChunkIndex,
 
             /// Skip generating accessors and exclude from on-disk structure
-            #[infinitree(strategy = "infinitree::index::SparseField")]
+            #[infinitree(strategy = "infinitree::fields::SparseField")]
             strategizing: ChunkIndex,
         }
         };
@@ -49,31 +49,31 @@ mod tests {
         #[automatically_derived]
         impl TestStruct {
             #[inline]
-            pub fn unattributed(&'_ self) -> ::infinitree::index::Access<Box<::infinitree::index::LocalField<ChunkIndex>>> {
-                use ::infinitree::index::{Access, Strategy};
+            pub fn unattributed(&'_ self) -> ::infinitree::fields::Access<Box<::infinitree::fields::LocalField<ChunkIndex>>> {
+                use ::infinitree::fields::{Access, Strategy};
                 Access::new(
                     "unattributed",
-                    Box::new(::infinitree::index::LocalField::for_field(
+                    Box::new(::infinitree::fields::LocalField::for_field(
 			&self.unattributed,
 		    )),
                 )
             }
             #[inline]
-            pub fn renamed_chunks(&'_ self) -> ::infinitree::index::Access<Box<::infinitree::index::LocalField<ChunkIndex>>> {
-                use ::infinitree::index::{Access, Strategy};
+            pub fn renamed_chunks(&'_ self) -> ::infinitree::fields::Access<Box<::infinitree::fields::LocalField<ChunkIndex>>> {
+                use ::infinitree::fields::{Access, Strategy};
                 Access::new(
                     "renamed_chunks",
-                    Box::new(::infinitree::index::LocalField::for_field(
+                    Box::new(::infinitree::fields::LocalField::for_field(
 			&self.chunks,
 		    )),
                 )
             }
             #[inline]
-            pub fn strategizing(&'_ self) -> ::infinitree::index::Access<Box<infinitree::index::SparseField<ChunkIndex>>> {
-                use ::infinitree::index::{Access, Strategy};
+            pub fn strategizing(&'_ self) -> ::infinitree::fields::Access<Box<infinitree::fields::SparseField<ChunkIndex>>> {
+                use ::infinitree::fields::{Access, Strategy};
                 Access::new(
                     "strategizing",
-                    Box::new(infinitree::index::SparseField::for_field(
+                    Box::new(infinitree::fields::SparseField::for_field(
                         &self.strategizing,
                     )),
                 )
@@ -86,14 +86,14 @@ mod tests {
             }
         }
         impl ::infinitree::Index for TestStruct {
-            fn store_all(&'_ mut self) -> ::infinitree::anyhow::Result<Vec<::infinitree::index::Access<Box<dyn ::infinitree::index::Store>>>> {
+            fn store_all(&'_ mut self) -> ::infinitree::anyhow::Result<Vec<::infinitree::fields::Access<Box<dyn ::infinitree::fields::Store>>>> {
                 Ok(vec![
                     self.unattributed().into(),
                     self.renamed_chunks().into(),
                     self.strategizing().into(),
                 ])
             }
-            fn load_all(&'_ mut self) -> ::infinitree::anyhow::Result<Vec<::infinitree::index::Access<Box<dyn ::infinitree::index::Load>>>> {
+            fn load_all(&'_ mut self) -> ::infinitree::anyhow::Result<Vec<::infinitree::fields::Access<Box<dyn ::infinitree::fields::Load>>>> {
                 Ok(vec![
                     self.unattributed().into(),
                     self.renamed_chunks().into(),

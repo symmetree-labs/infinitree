@@ -5,20 +5,19 @@
 extern crate serde_derive;
 
 pub mod backends;
-pub(crate) mod compress;
+mod chunks;
+mod compress;
+mod crypto;
+pub mod fields;
 pub mod index;
 pub mod object;
-
-mod chunks;
-mod crypto;
 mod tree;
 
-pub use crate::backends::Backend;
-pub use crate::index::Index;
-pub use crate::object::ObjectId;
-
+pub use backends::Backend;
 pub use chunks::ChunkPointer;
-pub use crypto::{secure_hash, ChunkKey, Digest, IndexKey, Key};
+pub use crypto::{secure_hash, Digest, Key};
+pub use index::Index;
+pub use object::ObjectId;
 pub use tree::Infinitree;
 
 pub use anyhow;

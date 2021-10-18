@@ -43,7 +43,7 @@ pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
                         field: f.clone(),
                         skip: false,
                         rename: f.ident.expect("named field expected").to_string(),
-                        strategy: quote! ( #infinitree_crate::index::LocalField ),
+                        strategy: quote! ( #infinitree_crate::fields::LocalField ),
                     },
                     |mut field, attr| {
                         if let Ok(Some(rename)) = get_name_attr(attr) {
@@ -80,8 +80,8 @@ pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 
             Ok(quote! {
 		#[inline]
-                pub fn #method_name(&'_ self) -> #infinitree_crate::index::Access<Box<#strategy<#field_ty>>> {
-		    use #infinitree_crate::index::{Access, Strategy};
+                pub fn #method_name(&'_ self) -> #infinitree_crate::fields::Access<Box<#strategy<#field_ty>>> {
+		    use #infinitree_crate::fields::{Access, Strategy};
 		    Access::new(
 			#field_name_str,
 			Box::new(#strategy::for_field(
@@ -125,11 +125,11 @@ pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 
 
         impl #infinitree_crate::Index for #impl_generics #st_name #ty_generics #where_clause {
-            fn store_all(&'_ mut self) -> #infinitree_crate::anyhow::Result<Vec<#infinitree_crate::index::Access<Box<dyn #infinitree_crate::index::Store>>>> {
+            fn store_all(&'_ mut self) -> #infinitree_crate::anyhow::Result<Vec<#infinitree_crate::fields::Access<Box<dyn #infinitree_crate::fields::Store>>>> {
                 Ok(vec![#strategies])
             }
 
-            fn load_all(&'_ mut self) -> #infinitree_crate::anyhow::Result<Vec<#infinitree_crate::index::Access<Box<dyn #infinitree_crate::index::Load>>>> {
+            fn load_all(&'_ mut self) -> #infinitree_crate::anyhow::Result<Vec<#infinitree_crate::fields::Access<Box<dyn #infinitree_crate::fields::Load>>>> {
                 Ok(vec![#strategies])
             }
         }

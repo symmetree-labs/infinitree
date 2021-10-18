@@ -9,18 +9,17 @@
 use crate::{
     compress,
     crypto::Digest,
+    fields::*,
     object::{ObjectId, WriteObject},
     ChunkPointer,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{error::Error, io::Cursor};
 
-pub mod fields;
 mod header;
 pub mod reader;
 pub mod writer;
 
-pub use fields::*;
 pub use header::*;
 pub use reader::ReadError;
 
