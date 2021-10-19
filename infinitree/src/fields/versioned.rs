@@ -53,22 +53,23 @@ where
     /// Call a function to set or overwrite the value at the given
     /// `key`
     #[inline(always)]
-    pub fn insert_with(&self, key: K, new: impl Fn() -> V) -> Arc<V> {
+    pub fn insert_with(&self, key: K, new: impl FnOnce() -> V) -> Arc<V> {
         match self.get(&key) {
             Some(v) => v,
             None => {
+                let new = Arc::new(Cell::new(Some(new)));
                 let result = Cell::new(None);
 
                 self.current.upsert(
                     key,
                     || {
-                        let val = store(new());
+                        let val = store(new.take().unwrap()());
                         result.set(val.clone());
                         val
                     },
                     |_, v| {
-                        *v = store(new());
-                        result.set(v.clone())
+                        *v = store(new.take().unwrap()());
+                        result.set(v.clone());
                     },
                 );
 
@@ -79,20 +80,21 @@ where
     }
 
     #[inline(always)]
-    pub fn update_with(&self, key: K, update: impl Fn(Arc<V>) -> V) -> Action<V> {
+    pub fn update_with(&self, key: K, update: impl FnOnce(Arc<V>) -> V) -> Action<V> {
         match self.get(&key) {
             Some(existing) => {
                 let result = Cell::new(None);
+                let update = Arc::new(Cell::new(Some(update)));
 
                 self.current.upsert(
                     key,
                     || {
-                        let val = store(update(existing.clone()));
+                        let val = store(update.take().unwrap()(existing.clone()));
                         result.set(val.clone());
                         val
                     },
                     |_, v| {
-                        *v = store(update(v.as_ref().unwrap().clone()));
+                        *v = store(update.take().unwrap()(v.as_ref().unwrap().clone()));
                         result.set(v.clone())
                     },
                 );

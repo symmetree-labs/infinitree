@@ -11,7 +11,6 @@ use crate::{
     crypto::Digest,
     fields::*,
     object::{ObjectId, WriteObject},
-    ChunkPointer,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{error::Error, io::Cursor};
@@ -20,8 +19,7 @@ mod header;
 pub mod reader;
 pub mod writer;
 
-pub use header::*;
-pub use reader::ReadError;
+pub(crate) use header::*;
 
 pub(crate) use reader::Reader;
 pub(crate) use writer::Writer;
@@ -31,9 +29,6 @@ pub(crate) type Generation = Digest;
 
 /// A list of transactions, represented in order, for versions and fields
 pub(crate) type TransactionList = Vec<(Generation, Field, ObjectId)>;
-
-/// A collection to find a hash using a chunk location pointer
-pub type ChunkIndex = Map<Digest, ChunkPointer>;
 
 type Encoder = compress::Encoder<WriteObject>;
 type Decoder =
@@ -47,15 +42,15 @@ type Decoder =
 ///
 /// Generally an index will allow you to work with its fields
 /// independently and in-memory, and the functions of this trait will
-/// only help accessing backing storage. The [`Access`] instances wrap
+/// only help accessing backing storage. The [`Intent`] instances wrap
 /// each field in a way that an [`Infinitree`](crate::Infinitree) can work with.
 pub trait Index: Send + Sync {
-    /// Generate an [`Access`] wrapper for each field in the `Index`.
+    /// Generate an [`Intent`] wrapper for each field in the `Index`.
     ///
     /// You should normally use the [`Index`](derive@crate::Index) derive macro to generate this.
     fn store_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Store>>>>;
 
-    /// Generate an [`Access`] wrapper for each field in the `Index`.
+    /// Generate an [`Intent`] wrapper for each field in the `Index`.
     ///
     /// You should normally use the [`Index`](derive@crate::Index) derive macro to generate this.
     fn load_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Load>>>>;
@@ -170,6 +165,8 @@ pub(crate) trait IndexExt: Index {
 mod tests {
     #[test]
     fn can_deserialize_fields() {
+        type ChunkMap = Map<crate::Digest, crate::ChunkPointer>;
+
         use crate::backends;
         use crate::crypto::{self, Digest};
         use crate::index::*;
@@ -185,7 +182,7 @@ mod tests {
         let storage = Arc::new(backends::test::InMemoryBackend::default());
         let oid = ObjectId::new(&crypto);
 
-        let chunks = ChunkIndex::default();
+        let chunks = ChunkMap::default();
         chunks.insert(Digest::default(), ChunkPointer::default());
 
         let object = {
@@ -203,7 +200,7 @@ mod tests {
             obj
         };
 
-        let chunks_restore = ChunkIndex::default();
+        let chunks_restore = ChunkMap::default();
         let mut reader = crate::object::AEADReader::new(storage.clone(), crypto.clone());
 
         Load::load(
