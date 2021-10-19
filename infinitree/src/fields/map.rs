@@ -111,19 +111,23 @@ where
     }
 }
 
-impl<'index, K, V> Store for LocalField<Map<K, V>>
+impl<K, V> Store for LocalField<Map<K, V>>
 where
     K: Key,
     V: Value,
 {
-    fn execute(&mut self, transaction: &mut writer::Transaction, _object: &mut dyn object::Writer) {
+    fn execute(
+        &mut self,
+        transaction: &mut writer::Transaction<'_>,
+        _object: &mut dyn object::Writer,
+    ) {
         self.field.for_each(|k, v| {
             transaction.write_next((k, v));
         })
     }
 }
 
-impl<'index, K, V> Collection for LocalField<Map<K, V>>
+impl<K, V> Collection for LocalField<Map<K, V>>
 where
     K: Key,
     V: Value,
@@ -151,7 +155,11 @@ where
     K: Key,
     V: Value,
 {
-    fn execute(&mut self, transaction: &mut writer::Transaction, writer: &mut dyn object::Writer) {
+    fn execute(
+        &mut self,
+        transaction: &mut writer::Transaction<'_>,
+        writer: &mut dyn object::Writer,
+    ) {
         self.field.for_each(|key, value| {
             let ptr = object::serializer::write(
                 writer,
@@ -168,7 +176,7 @@ where
     }
 }
 
-impl<'index, K, V> Collection for SparseField<Map<K, V>>
+impl<K, V> Collection for SparseField<Map<K, V>>
 where
     K: Key,
     V: Value,

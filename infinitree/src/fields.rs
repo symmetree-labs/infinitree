@@ -70,7 +70,11 @@ pub trait Store {
     ///
     /// Typically, the [`ChunkPointer`][crate::ChunkPointer] values returned by `object`
     /// should be stored in the index.
-    fn execute(&mut self, transaction: &mut writer::Transaction, object: &mut dyn object::Writer);
+    fn execute(
+        &mut self,
+        transaction: &mut writer::Transaction<'_>,
+        object: &mut dyn object::Writer,
+    );
 }
 
 /// Load all data from the index field into memory.
@@ -272,7 +276,7 @@ impl<T: Store + 'static> From<Intent<Box<T>>> for Intent<Box<dyn Store>> {
     fn from(a: Intent<Box<T>>) -> Self {
         Intent {
             name: a.name,
-            strategy: a.strategy as Box<dyn Store>,
+            strategy: a.strategy,
         }
     }
 }
@@ -282,7 +286,7 @@ impl<T: Load + 'static> From<Intent<Box<T>>> for Intent<Box<dyn Load>> {
     fn from(a: Intent<Box<T>>) -> Self {
         Intent {
             name: a.name,
-            strategy: a.strategy as Box<dyn Load>,
+            strategy: a.strategy,
         }
     }
 }
@@ -325,7 +329,7 @@ impl<T: Send + Sync + Clone> Strategy<T> for LocalField<T> {
     }
 }
 
-impl<'iter, T> Query for T
+impl<T> Query for T
 where
     T: Collection,
 {
@@ -352,7 +356,11 @@ impl<T> Store for LocalField<List<T>>
 where
     T: Value,
 {
-    fn execute(&mut self, transaction: &mut writer::Transaction, _object: &mut dyn object::Writer) {
+    fn execute(
+        &mut self,
+        transaction: &mut writer::Transaction<'_>,
+        _object: &mut dyn object::Writer,
+    ) {
         for v in self.field.read().iter() {
             transaction.write_next(v);
         }

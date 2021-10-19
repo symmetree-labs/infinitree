@@ -17,11 +17,11 @@ use std::sync::Arc;
 pub struct Serialized<T>(Arc<RwLock<T>>);
 
 impl<T> Serialized<T> {
-    pub fn read(&self) -> parking_lot::lock_api::RwLockReadGuard<parking_lot::RawRwLock, T> {
+    pub fn read(&self) -> parking_lot::lock_api::RwLockReadGuard<'_, parking_lot::RawRwLock, T> {
         self.0.read()
     }
 
-    pub fn write(&self) -> parking_lot::lock_api::RwLockWriteGuard<parking_lot::RawRwLock, T> {
+    pub fn write(&self) -> parking_lot::lock_api::RwLockWriteGuard<'_, parking_lot::RawRwLock, T> {
         self.0.write()
     }
 }
@@ -31,7 +31,11 @@ where
     T: Serialize + Sync,
 {
     #[inline(always)]
-    fn execute(&mut self, transaction: &mut writer::Transaction, _object: &mut dyn object::Writer) {
+    fn execute(
+        &mut self,
+        transaction: &mut writer::Transaction<'_>,
+        _object: &mut dyn object::Writer,
+    ) {
         transaction.write_next(&*self.field.read());
     }
 }

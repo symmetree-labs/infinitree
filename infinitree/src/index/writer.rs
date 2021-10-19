@@ -194,7 +194,7 @@ impl WriteState {
         match self {
             Idle => unreachable!(),
             Parked(_) => {
-                let mut tmp = WriteState::Idle;
+                let mut tmp = Idle;
                 std::mem::swap(&mut tmp, self);
 
                 let encoder = match tmp {
@@ -202,7 +202,7 @@ impl WriteState {
                     _ => unreachable!(),
                 };
 
-                let _ = std::mem::replace(self, WriteState::Encoding(encoder));
+                let _ = std::mem::replace(self, Encoding(encoder));
                 Ok(self)
             }
             Encoding(_) => Ok(self),
@@ -212,7 +212,7 @@ impl WriteState {
     fn finish(&mut self) -> Result<WriteObject> {
         use WriteState::*;
 
-        let mut encoder = WriteState::Idle;
+        let mut encoder = Idle;
         std::mem::swap(self, &mut encoder);
 
         match encoder {

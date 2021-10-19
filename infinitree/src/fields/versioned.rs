@@ -249,7 +249,11 @@ where
     V: Value,
 {
     #[inline(always)]
-    fn execute(&mut self, transaction: &mut writer::Transaction, _object: &mut dyn object::Writer) {
+    fn execute(
+        &mut self,
+        transaction: &mut writer::Transaction<'_>,
+        _object: &mut dyn object::Writer,
+    ) {
         self.field.current.for_each(|k, v| {
             transaction.write_next((k, v));
         });
@@ -315,7 +319,11 @@ where
     V: Value,
 {
     #[inline(always)]
-    fn execute(&mut self, transaction: &mut writer::Transaction, writer: &mut dyn object::Writer) {
+    fn execute(
+        &mut self,
+        transaction: &mut writer::Transaction<'_>,
+        writer: &mut dyn object::Writer,
+    ) {
         self.field.current.for_each(|key, value| {
             let ptr = value.as_ref().map(|stored| {
                 object::serializer::write(

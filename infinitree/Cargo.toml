@@ -28,7 +28,6 @@ lz4_flex = { version = "0.9.0", default-features = false , features = ["frame"] 
 dashmap = "^4.0"
 scc = "0.5"
 flume = "^0.10"
-libc = "0.2"
 lru = "0.7"
 thiserror = "1.0"
 anyhow = "1.0"

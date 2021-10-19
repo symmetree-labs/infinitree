@@ -1,3 +1,39 @@
+//! Infinitree is a versioned, embedded database that uses uniform,
+//! encrypted blobs to store data.
+//!
+//! It works best for use cases with independent writer processes, as
+//! multiple writer processes on a single tree are not supported.
+//!
+//! ## Features
+//!
+//!  * Thread-safe by default
+//!  * Transparently handle hot/warm/cold storage tiers; currently S3-compatible backends is supported
+//!  * Versioned data structures that can be queried using the `Iterator` trait without loading in full
+//!  * Encrypt all on-disk data, and only decrypt it on use
+//!  * Focus on performance and flexible choice of performance/memory use tradeoffs
+//!  * Extensible for custom data types and storage strategies
+//!  * Easy to integrate with cloud workers & KMS for access control
+//!
+//! ## Core concepts
+//! ### Infinitree
+//!
+//! [`Infinitree`] provides high-level versioning, querying, and key
+//! and memory management operations for working with the different
+//! [`fields`] in the [`Index`].
+//!
+//!
+//!
+//!
+
+#![deny(
+    future_incompatible,
+    nonstandard_style,
+    rust_2018_idioms,
+    trivial_casts,
+    unused_crate_dependencies,
+    unused_lifetimes,
+    unused_qualifications
+)]
 #![deny(clippy::all)]
 #![allow(clippy::ptr_arg)]
 

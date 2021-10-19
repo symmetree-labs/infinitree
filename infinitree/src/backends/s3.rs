@@ -20,7 +20,7 @@ use std::{
     time::SystemTime,
 };
 
-type TaskHandle = tokio::task::JoinHandle<std::result::Result<PutObjectOutput, anyhow::Error>>;
+type TaskHandle = JoinHandle<anyhow::Result<PutObjectOutput>>;
 
 #[derive(Clone)]
 pub struct InMemoryS3 {

@@ -83,16 +83,13 @@ where
     fn from(rwr: WO) -> ReadObject {
         let rw = rwr.as_ref();
 
-        Object::with_id(
-            rw.id,
-            ReadBuffer(Box::new(rw.buffer.clone()) as ReadBufferInner),
-        )
+        Object::with_id(rw.id, ReadBuffer(Box::new(rw.buffer.clone())))
     }
 }
 
 impl ReadBuffer {
     pub fn new(buf: impl AsRef<[u8]> + Send + Sync + 'static) -> ReadBuffer {
-        ReadBuffer(Box::new(buf) as ReadBufferInner)
+        ReadBuffer(Box::new(buf))
     }
 }
 
