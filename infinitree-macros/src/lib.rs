@@ -6,10 +6,42 @@ use syn::{parse_macro_input, DeriveInput};
 
 mod derive_index;
 
+/// Example use of the derive macro:
+///
+/// ```
+/// use infinitree::fields::{Serialized, VersionedMap};
+/// use serde::{Serialize, Deserialize};
+///
+/// #[derive(Serialize, Deserialize)]
+/// struct PlantHealth {
+///     id: usize,
+///     air_humidity: usize,
+///     soil_humidity: usize,
+///     temperature: f32
+/// }
+///
+/// #[derive(infinitree::Index, Default, Clone)]
+/// pub struct Measurements {
+///     // rename the field when serializing
+///     #[infinitree(name = "last_time")]
+///     _old_last_time: Serialized<String>,
+///
+///     #[infinitree(name = "last_time2")]
+///     last_time: Serialized<usize>,
+///
+///     // only store the keys in the index, not the values
+///     #[infinitree(strategy = "infinitree::fields::SparseField")]
+///     measurements: VersionedMap<usize, PlantHealth>,
+///
+///     // skip the next field when loading & serializing
+///     #[infinitree(skip)]
+///     current_time: usize,
+/// }
+/// ```
 #[proc_macro_derive(Index, attributes(infinitree))]
 pub fn derive_index_macro(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    derive_index::expand(input)
+    derive_index::expand(derive_index::crate_name_token(), input)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
@@ -42,7 +74,7 @@ mod tests {
         }
         };
 
-        let result = super::derive_index::expand(input).unwrap();
+        let result = super::derive_index::expand(quote::quote!(::infinitree), input).unwrap();
 
         #[rustfmt::skip]
         let expected = quote! {

@@ -18,7 +18,7 @@ struct CommitMetadata {
     time: DateTime<Utc>,
 }
 
-#[derive(Default, crate::Index)]
+#[derive(Default, infinitree_macros::Index)]
 struct RootIndex {
     /// Transaction log of individual fields included in each
     /// generation.
@@ -102,7 +102,10 @@ impl<I: Index> Infinitree<I> {
         )
     }
 
-    pub fn commit(&mut self, message: Option<String>) -> Result<()> {
+    pub fn commit<T: AsRef<str> + ToString>(
+        &mut self,
+        message: impl Into<Option<T>>,
+    ) -> Result<()> {
         let key = self.master_key.get_meta_key()?;
         let start_meta = ObjectId::new(&key);
 
@@ -127,7 +130,7 @@ impl<I: Index> Infinitree<I> {
 
         self.root.commit_metadata.write().push(CommitMetadata {
             generation,
-            message,
+            message: message.into().map(|msg| msg.to_string()),
             time: Utc::now(),
         });
 

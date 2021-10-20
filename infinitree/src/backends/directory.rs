@@ -55,12 +55,12 @@ pub struct Directory {
 }
 
 impl Directory {
-    pub fn new(target: impl AsRef<Path>) -> Result<Directory> {
+    pub fn new(target: impl AsRef<Path>) -> Result<Arc<Directory>> {
         std::fs::create_dir_all(&target)?;
-        Ok(Directory {
+        Ok(Arc::new(Directory {
             target: target.as_ref().into(),
             read_lru: Arc::new(Mutex::new(LruCache::new(256))),
-        })
+        }))
     }
 
     pub fn path(&self) -> &Path {

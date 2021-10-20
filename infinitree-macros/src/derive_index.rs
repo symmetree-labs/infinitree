@@ -14,15 +14,27 @@ struct StructField {
     strategy: TokenStream,
 }
 
-pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
-    let infinitree_crate = match crate_name("infinitree").expect("couldn't find infinitree") {
+pub(crate) fn crate_name_token() -> TokenStream {
+    let rustdoc =
+        std::env::var("RUSTDOC_TEST_LINE").or_else(|_| std::env::var("UNSTABLE_RUSTDOC_TEST_LINE"));
+    if rustdoc.is_ok() {
+        // running in rustdoc
+        return quote!(infinitree);
+    }
+
+    match crate_name("infinitree").expect("couldn't find infinitree") {
         FoundCrate::Itself => quote!(crate),
         FoundCrate::Name(name) => {
             let ident = Ident::new(&name, Span::call_site());
             quote!( ::#ident )
         }
-    };
+    }
+}
 
+pub(crate) fn expand(
+    infinitree_crate: TokenStream,
+    input: DeriveInput,
+) -> syn::Result<TokenStream> {
     let fields = match input.data {
         Data::Struct(DataStruct {
             fields: Fields::Named(fields),

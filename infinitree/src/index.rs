@@ -165,7 +165,7 @@ pub(crate) trait IndexExt: Index {
 mod tests {
     #[test]
     fn can_deserialize_fields() {
-        type ChunkMap = Map<crate::Digest, crate::ChunkPointer>;
+        type ChunkMap = Map<Digest, ChunkPointer>;
 
         use crate::backends;
         use crate::crypto::{self, Digest};

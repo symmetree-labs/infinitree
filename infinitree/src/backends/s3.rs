@@ -144,7 +144,7 @@ pub struct Cache<Upstream> {
 
     size_limit: NonZeroUsize,
     upstream: Upstream,
-    directory: Directory,
+    directory: Arc<Directory>,
 }
 
 impl<Upstream> Cache<Upstream> {

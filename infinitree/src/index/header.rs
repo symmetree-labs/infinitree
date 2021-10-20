@@ -68,6 +68,7 @@ impl Header {
         }
     }
 
+    #[allow(dead_code)]
     pub fn fields(&self) -> Vec<Field> {
         match self {
             Header::V1 { ref offsets, .. } => offsets.iter().map(FieldOffset::as_field).collect(),

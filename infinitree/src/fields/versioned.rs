@@ -17,7 +17,6 @@ fn store_if_none<V>(current: &mut Option<Arc<V>>, value: impl Into<Arc<V>>) {
     current.get_or_insert(value.into());
 }
 
-#[derive(Clone, Default)]
 pub struct VersionedMap<K, V>
 where
     K: Key + 'static,
@@ -25,6 +24,32 @@ where
 {
     current: Arc<HashMap<K, Action<V>>>,
     base: Arc<HashMap<K, Action<V>>>,
+}
+
+impl<K, V> Clone for VersionedMap<K, V>
+where
+    K: Key + 'static,
+    V: Value + 'static,
+{
+    fn clone(&self) -> Self {
+        VersionedMap {
+            base: self.base.clone(),
+            current: self.current.clone(),
+        }
+    }
+}
+
+impl<K, V> Default for VersionedMap<K, V>
+where
+    K: Key + 'static,
+    V: Value + 'static,
+{
+    fn default() -> Self {
+        VersionedMap {
+            base: Arc::default(),
+            current: Arc::default(),
+        }
+    }
 }
 
 impl<K, V> VersionedMap<K, V>

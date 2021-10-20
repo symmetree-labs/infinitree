@@ -19,6 +19,7 @@ syn = "1"
 
 [dev-dependencies]
 infinitree = { path = "../infinitree", version = "*"}
+serde = "1"
 
 [lib]
 proc-macro = true
