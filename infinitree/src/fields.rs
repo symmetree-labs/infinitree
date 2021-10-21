@@ -1,4 +1,4 @@
-//! Traits and implementations for working with index members
+//! Traits and implementations for working with index members.
 //!
 //! There are 3 ways to interact with an index field:
 //!

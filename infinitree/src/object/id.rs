@@ -4,6 +4,7 @@ pub use hex::FromHexError;
 
 use std::{convert::TryFrom, string::ToString};
 
+/// Unique identifier for a persistence object.
 #[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObjectId(Digest);
 

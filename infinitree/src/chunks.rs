@@ -10,6 +10,10 @@ pub(crate) struct RawChunkPointer {
     pub tag: Tag,
 }
 
+/// A pointer for a chunk of data in the object system.
+///
+/// A `ChunkPointer`, in addition to a [`Key`][crate::Key] is required
+/// to access most data that's outside the index system.
 #[derive(Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub struct ChunkPointer(RawChunkPointer);
 

@@ -14,6 +14,10 @@ const CRYPTO_DIGEST_SIZE: usize = 32;
 type Nonce = [u8; 12];
 type RawKey = Secret<[u8; CRYPTO_DIGEST_SIZE]>;
 
+/// A digest-like type.
+///
+/// Note that you should not rely on this type staying what it is
+/// right now. The specific type is subject to change in the future.
 pub type Digest = [u8; CRYPTO_DIGEST_SIZE];
 pub type Tag = [u8; 16];
 
@@ -27,6 +31,8 @@ pub enum CryptoError {
 }
 pub type Result<T> = std::result::Result<T, CryptoError>;
 
+/// This is a securely stored key that's the root for crypto
+/// operations.
 pub struct Key {
     master_key: RawKey,
 }
@@ -43,6 +49,9 @@ pub struct ObjectOperations {
 pub type IndexKey = ObjectOperations;
 pub type ChunkKey = ObjectOperations;
 
+/// Cryptographically secure hash function.
+///
+/// Currently Blake2bp with a 256bit output.
 #[inline]
 pub fn secure_hash(content: &[u8]) -> Digest {
     let mut output = Digest::default();
