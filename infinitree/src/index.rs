@@ -27,8 +27,10 @@ pub(crate) use writer::Writer;
 /// A representation of a generation within the tree
 pub(crate) type Generation = Digest;
 
+pub(crate) type TransactionPointer = (Generation, Field, ObjectId);
+
 /// A list of transactions, represented in order, for versions and fields
-pub(crate) type TransactionList = Vec<(Generation, Field, ObjectId)>;
+pub(crate) type TransactionList = Vec<TransactionPointer>;
 
 type Encoder = compress::Encoder<WriteObject>;
 type Decoder =
@@ -111,15 +113,16 @@ pub(crate) trait IndexExt: Index {
         &mut self,
         index: &mut Writer,
         object: &mut dyn crate::object::Writer,
+        mut hashed_data: Vec<u8>,
     ) -> anyhow::Result<(Generation, Vec<(Field, ObjectId)>)> {
         let log = self
             .store_all()?
             .drain(..)
             .map(|mut action| (action.name.clone(), self.store(index, object, &mut action)))
             .collect();
+        hashed_data.extend(crate::serialize_to_vec(&log)?);
 
-        let version = crate::crypto::secure_hash(&crate::serialize_to_vec(&log)?);
-
+        let version = crate::crypto::secure_hash(&hashed_data);
         index.seal_and_store();
         Ok((version, log))
     }

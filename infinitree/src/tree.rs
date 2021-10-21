@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+
 use crate::{
     fields::{
         self, Collection, Intent, Load, Query, QueryAction, QueryIteratorOwned, Serialized, Store,
@@ -11,13 +13,39 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 
+/// All fields of this struct are hashed into `digest` to make a
+/// [`Generation`]
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct CommitMetadata {
-    generation: Generation,
+pub struct CommitMetadata {
+    digest: Generation,
+    previous: Option<Generation>,
     message: Option<String>,
     time: DateTime<Utc>,
 }
 
+/// Enum to navigate the versions that are available in an Infinitree
+#[allow(unused)]
+pub enum GenerationSet {
+    /// On querying, all versions will be crawled. This is the
+    /// default.
+    All,
+    /// Only a single generation will be looked at during querying.
+    Single(Generation),
+    /// All generations up to and including the given one will be queried.
+    UpTo(Generation),
+    /// Only use generations between the two given versions.
+    /// The first parameter **must** be earlier generation than the
+    /// second.
+    Range(Generation, Generation),
+}
+
+impl Default for GenerationSet {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+/// The root index of the tree that stores version information
 #[derive(Default, infinitree_macros::Index)]
 struct RootIndex {
     /// Transaction log of individual fields included in each
@@ -32,19 +60,69 @@ struct RootIndex {
     commit_metadata: Serialized<Vec<CommitMetadata>>,
 }
 
+impl RootIndex {
+    fn version_after(&self, gen: &Generation) -> Option<Generation> {
+        let handle = self.commit_metadata.read();
+
+        // walking in reverse may hit faster
+        let mut iter = handle.iter().rev().map(|c| c.digest).peekable();
+        while let Some(i) = iter.next() {
+            if Some(gen) == iter.peek() {
+                return Some(i);
+            }
+        }
+
+        None
+    }
+}
+
+/// An Infinitree root.
+///
+/// This is primarily a wrapper around an [`Index`] that manages
+/// versioning and key management.
 pub struct Infinitree<I> {
+    /// All versioning-related stuff is in the `RootIndex`.
     root: RootIndex,
+
+    /// The Index we're currently working with.
     index: I,
 
+    /// Backend reference.
     backend: Arc<dyn Backend>,
+
+    /// Key that's used to derive all internal keys.
     master_key: Key,
+
+    /// These are the generations we're currently working on.
+    selected_gens: GenerationSet,
 }
 
 impl<I: Index + Default> Infinitree<I> {
+    /// Initialize an empty index and tree with no version history.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use infinitree::{Infinitree, Key, fields::Serialized, backends::Directory};
+    ///
+    /// #[derive(infinitree::Index, Default)]
+    /// struct Measurements {
+    ///     list: Serialized<Vec<usize>>
+    /// }
+    ///
+    /// let mut tree = Infinitree::<Measurements>::empty(
+    ///     Directory::new("/storage").unwrap(),
+    ///     Key::from_credentials("username", "password").unwrap()
+    /// );
+    /// ```
     pub fn empty(backend: Arc<dyn Backend>, master_key: Key) -> Self {
         Self::with_key(backend, I::default(), master_key)
     }
 
+    /// Load all version information from the tree.
+    ///
+    /// This method doesn't load the index, only the associated
+    /// metadata.
     pub fn open(backend: Arc<dyn Backend>, master_key: Key) -> Result<Self> {
         let root_object = master_key.root_object_id()?;
         let mut root = RootIndex::default();
@@ -56,6 +134,7 @@ impl<I: Index + Default> Infinitree<I> {
             backend,
             master_key,
             index: I::default(),
+            selected_gens: GenerationSet::default(),
         })
     }
 }
@@ -85,34 +164,75 @@ fn open_root(
 }
 
 impl<I: Index> Infinitree<I> {
+    /// Wraps the given `index` in an Infinitree.
+    ///
+    /// This is primarily useful if you're done writing an `Index`,
+    /// and want to commit and persist it, or if you need extra
+    /// initialization because `Default` is not viable.
     pub fn with_key(backend: Arc<dyn Backend>, index: I, master_key: Key) -> Self {
         Self {
             backend,
             index,
             master_key,
             root: RootIndex::default(),
+            selected_gens: GenerationSet::default(),
         }
     }
 
-    pub fn load_all(&mut self) -> Result<()> {
-        self.index.load_all_from(
-            &self.root.transaction_log.read(),
-            &self.meta_reader()?,
-            &mut self.object_reader()?,
-        )
+    /// Only run persistence query operations
+    /// ([`query`][Infinitree::query], [`load`][Infinitree::load],
+    /// [`iter`][Infinitree::iter]) on the selected generations.
+    pub fn select(&mut self, version: GenerationSet) {
+        self.selected_gens = version;
     }
 
-    pub fn commit<T: AsRef<str> + ToString>(
-        &mut self,
-        message: impl Into<Option<T>>,
-    ) -> Result<()> {
+    /// Return all generations in the tree.
+    pub fn generations(&self) -> Vec<CommitMetadata> {
+        self.root.commit_metadata.read().clone()
+    }
+
+    /// Commit changes currently in the index.
+    ///
+    /// This persists currently in-memory data, and also records the
+    /// commit with `message` to the log.
+    ///
+    /// # Examples
+    ///
+    /// Any commit message works that implements [`ToString`].
+    ///
+    /// ```ignore
+    /// // No message can be given using a literal None
+    /// tree.commit(None);
+    ///
+    /// // Otherwise a hardcoded &str also works
+    /// tree.commit("this is a message");
+    ///
+    /// // Or even a String instance
+    /// let message = "this is a string".to_string();
+    /// tree.commit(message);
+    /// ```
+    pub fn commit<T: ToString>(&mut self, message: impl Into<Option<T>>) -> Result<()> {
         let key = self.master_key.get_meta_key()?;
         let start_meta = ObjectId::new(&key);
 
         let mut index = index::Writer::new(start_meta, self.backend.clone(), key.clone())?;
         let mut object = self.object_writer()?;
 
-        let (generation, changeset) = self.index.commit(&mut index, &mut object)?;
+        let time = Utc::now();
+        let message = message.into().map(|msg| msg.to_string());
+        let previous = self.root.commit_metadata.read().last().map(|c| c.digest);
+        let (digest, changeset) = self.index.commit(
+            &mut index,
+            &mut object,
+            crate::serialize_to_vec(&(&time, &previous, &message))?,
+        )?;
+
+        self.root.commit_metadata.write().push(CommitMetadata {
+            digest,
+            previous,
+            time,
+            message,
+        });
 
         // scope for rewriting history. this is critical, the log is locked.
         {
@@ -123,26 +243,34 @@ impl<I: Index> Infinitree<I> {
             tr_log.extend(
                 changeset
                     .into_iter()
-                    .map(|(field, oid)| (generation, field, oid)),
+                    .map(|(field, oid)| (digest, field, oid)),
             );
             tr_log.extend(history);
         }
 
-        self.root.commit_metadata.write().push(CommitMetadata {
-            generation,
-            message: message.into().map(|msg| msg.to_string()),
-            time: Utc::now(),
-        });
-
         let mut index =
             index::Writer::new(self.master_key.root_object_id()?, self.backend.clone(), key)?;
 
-        // ok to discard this as we're flushing the whole root object anyway
-        let _ = self.root.commit(&mut index, &mut object)?;
+        // ok to discard this as we're flushing the whole root object
+        // anyway
+        let _ = self.root.commit(&mut index, &mut object, vec![])?;
         Ok(())
     }
 
-    pub fn store(&self, field: impl Into<Intent<Box<dyn Store>>>) -> Result<ObjectId> {
+    /// Load into memory all fields for the selected version ranges
+    pub fn load_all(&mut self) -> Result<()> {
+        self.index.load_all_from(
+            &self.filter_generations(),
+            &self.meta_reader()?,
+            &mut self.object_reader()?,
+        )
+    }
+
+    /// I don't think this function makes sense publicly in this form.
+    ///
+    /// TODO: how this would work well is an open question.
+    #[allow(unused)]
+    pub(crate) fn store(&self, field: impl Into<Intent<Box<dyn Store>>>) -> Result<ObjectId> {
         let mut field = field.into();
         let start_object = self.store_start_object(&field.name);
 
@@ -153,6 +281,7 @@ impl<I: Index> Infinitree<I> {
         ))
     }
 
+    /// Load the field for the selected generation set
     pub fn load(&self, field: impl Into<Intent<Box<dyn Load>>>) -> Result<()> {
         let mut field = field.into();
         let commits_for_field = self.field_for_version(&field.name);
@@ -166,7 +295,8 @@ impl<I: Index> Infinitree<I> {
         Ok(())
     }
 
-    pub fn select<K>(
+    /// Load into memory all data from `field` where `pred` returns `true`
+    pub fn query<K>(
         &self,
         mut field: Intent<Box<impl Query<Key = K>>>,
         pred: impl Fn(&K) -> QueryAction,
@@ -183,7 +313,8 @@ impl<I: Index> Infinitree<I> {
         Ok(())
     }
 
-    pub fn query<K, O, Q>(
+    /// Same as [`query`][Self::query], but returns an `Iterator`
+    pub fn iter<K, O, Q>(
         &self,
         mut field: Intent<Box<Q>>,
         pred: impl Fn(&K) -> QueryAction + 'static,
@@ -215,13 +346,39 @@ impl<I: Index> Infinitree<I> {
         ObjectId::new(&self.master_key.get_meta_key().unwrap())
     }
 
-    fn field_for_version(&self, field: &index::Field) -> TransactionList {
+    fn filter_generations(&self) -> TransactionList {
         self.root
             .transaction_log
             .read()
             .iter()
-            .filter(|(_, name, _)| name == field)
+            .skip_while(|(gen, _, _)| match &self.selected_gens {
+                GenerationSet::All => false,
+                GenerationSet::Single(target) => gen != target,
+                GenerationSet::UpTo(_target) => false,
+                GenerationSet::Range(start, _end) => gen != start,
+            })
+            .take_while(|(gen, _, _)| match &self.selected_gens {
+                GenerationSet::All => true,
+                GenerationSet::Single(target) => gen == target,
+                GenerationSet::UpTo(target) => self
+                    .root
+                    .version_after(target)
+                    .map(|ref v| v != gen)
+                    .unwrap_or(true),
+                GenerationSet::Range(_start, end) => self
+                    .root
+                    .version_after(end)
+                    .map(|ref v| v != gen)
+                    .unwrap_or(true),
+            })
             .cloned()
+            .collect()
+    }
+
+    fn field_for_version(&self, field: &index::Field) -> TransactionList {
+        self.filter_generations()
+            .into_iter()
+            .filter(|(_, name, _)| name == field)
             .collect::<Vec<_>>()
     }
 
@@ -240,6 +397,14 @@ impl<I: Index> Infinitree<I> {
         ))
     }
 
+    /// Return a handle for an object writer.
+    ///
+    /// This can be used to manually write sparse data if you don't
+    /// want to store it in memory. Especially useful for e.g. files.
+    ///
+    /// Note that currently there's no fragmenting internally, so
+    /// anything written using an ObjectWriter **must** be less than
+    /// about 4MB.
     pub fn object_writer(&self) -> Result<AEADWriter> {
         Ok(AEADWriter::new(
             self.backend.clone(),
@@ -247,6 +412,12 @@ impl<I: Index> Infinitree<I> {
         ))
     }
 
+    /// Return a handle for an object reader
+    ///
+    /// The object reader is for reading out those [`ChunkPointer`][crate::ChunkPointer]s
+    /// that you get when using an [`AEADWriter`] stack manually.
+    ///
+    /// You can obtain an [`AEADWriter`] using [`object_writer`][Self::object_writer].
     pub fn object_reader(&self) -> Result<AEADReader> {
         Ok(AEADReader::new(
             self.backend.clone(),
@@ -254,6 +425,11 @@ impl<I: Index> Infinitree<I> {
         ))
     }
 
+    /// Return an immutable reference to the internal index.
+    ///
+    /// By design this is read-only, as the index fields
+    /// should use internal mutability and be thread-safe
+    /// individually.
     pub fn index(&self) -> &I {
         &self.index
     }
