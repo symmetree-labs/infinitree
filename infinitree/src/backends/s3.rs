@@ -260,6 +260,7 @@ impl<Upstream: 'static + Backend + Clone> Backend for Cache<Upstream> {
         let cache = self.clone();
 
         runtime::Handle::current().block_on(async move {
+            let _ = &cache;
             match cache.file_list.write().await.get(id) {
                 Some(_) => cache.directory.read_object(id),
                 None => {
