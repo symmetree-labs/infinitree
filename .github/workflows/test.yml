@@ -9,6 +9,7 @@ on:
 jobs:
   security_audit:
     runs-on: ubuntu-latest
+    if: false
     steps:
     - uses: actions/checkout@v1
     - uses: actions-rs/audit-check@v1
