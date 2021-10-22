@@ -2,13 +2,14 @@
 name = "infinitree-macros"
 authors = ["Peter Parkanyi <p@symmetree.dev>"]
 description = "Embedded, encrypted database with tiered cache"
-version = "0.2.0"
+version = "0.2.1"
 keywords = ["crypto", "database", "cache", "sqlite", "rocksdb"]
 categories = ["database-implementations", "concurrency", "data-structures", "algorithms", "caching"]
 homepage = "https://symmetree.dev"
 repository = "https://github.com/symmetree-labs/infinitree"
 license = "MIT OR Apache-2.0"
 edition= "2021"
+readme="../README.md"
 
 [dependencies]
 proc-macro-crate = "1.0.0"
