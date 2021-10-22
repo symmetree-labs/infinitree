@@ -1,8 +1,8 @@
 [package]
 name = "infinitree"
 authors = ["Peter Parkanyi <p@symmetree.dev>"]
-description = "Embedded, encrypted database with 3-tier cache"
-version = "0.1.0"
+description = "Embedded, encrypted database with tiered cache"
+version = "0.2.0"
 keywords = ["crypto", "database", "cache", "sqlite", "rocksdb"]
 categories = ["database-implementations", "concurrency", "data-structures", "algorithms", "caching"]
 homepage = "https://symmetree.dev"
@@ -42,7 +42,7 @@ rmp-serde = "^0.15"
 secrecy = "0.8"
 zeroize = "^1"
 
-infinitree-macros = { version = "0.1.0", path = "../infinitree-macros" }
+infinitree-macros = { version = "0.2.0", path = "../infinitree-macros" }
 
 rusoto_core = { version="0.47", default_features=false, features=["rustls"], optional = true }
 rusoto_s3 = { version="0.47", default_features=false, features=["rustls"], optional = true }
