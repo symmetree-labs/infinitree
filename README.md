@@ -142,6 +142,9 @@ there are multiple subkeys used internally, which means layering other
 (e.g. public key) encryption methods onto data stored in indexes is
 safe.
 
+For a more in-depth overview of the security and attacker model of the
+object system, please see the [DESIGN.md] document.
+
 ## Warning
 
 This is an unreviewed piece of experimental security software.
@@ -160,3 +163,4 @@ implementation, [get in touch](mailto:hello@symmetree.dev).
 
 [mit-url]: https://github.com/symmetree-labs/infinitree/blob/master/LICENSE
 [apache2-url]: https://github.com/symmetree-labs/infinitree/blob/master/LICENSE-APACHE2
+[DESIGN.md]: https://github.com/symmetree-labs/infinitree/blob/master/DESIGN.md
