@@ -3,6 +3,7 @@ Infinitree
 
 [![Crates.io][crates-badge]][crates-url]
 [![docs.rs][docs-badge]][docs-url]
+[![Build Status][actions-badge]][actions-url]
 [![MIT licensed][mit-badge]][mit-url]
 [![Apache2 licensed][apache2-badge]][apache2-url]
 
@@ -10,6 +11,8 @@ Infinitree
 [crates-url]: https://crates.io/crates/infinitree
 [docs-badge]: https://docs.rs/infinitree/badge.svg
 [docs-url]: https://docs.rs/infinitree
+[actions-badge]: https://github.com/symmetree-labs/infinitree/workflows/CI/badge.svg
+[actions-url]: https://github.com/symmetree-labs/infinitree/actions?query=workflow%3ACI+branch%3Amaster
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [apache2-badge]: https://img.shields.io/badge/license-Apache2-red.svg
 
@@ -104,6 +107,19 @@ Versioned types only store differences from the currently loaded state.
 
 It also possible to restore state selectively, or create completely
 disparate branches of data for each commit, depending on the use case.
+
+## Caching
+
+Data is always moved as part of objects. 
+
+This mechanism allows for indexing hundreds of terrabytes of data that
+span multiple disks and cloud storage platforms, while only
+synchronizing and loading into memory a small proportion of that.
+
+Application developers can use fine-grained control of cache layers
+using simple strategies, eg. Least-Recently-Used, where recently
+queried objects can be stored in a local directory, while the rest is
+in an S3 bucket.
 
 ## Object system
 
