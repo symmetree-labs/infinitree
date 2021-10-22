@@ -1,4 +1,4 @@
-name: Quick check crates
+name: CI
 
 on:
   push:
