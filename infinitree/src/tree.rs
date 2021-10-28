@@ -10,17 +10,41 @@ use crate::{
     Backend, Key, ObjectId,
 };
 use anyhow::Result;
-use chrono::{DateTime, Utc};
-use std::sync::Arc;
+use serde_with::serde_as;
+use std::{sync::Arc, time::SystemTime};
+
+/// This is primarily a serialization helper, so we can hash all of
+/// this metadata consistently with [`CommitMetadata`]
+#[serde_as]
+#[derive(Serialize, Debug, Clone)]
+struct PreCommitMetadata {
+    previous: Option<Generation>,
+    message: Option<String>,
+    #[serde_as(as = "serde_with::TimestampSecondsWithFrac<f64>")]
+    time: SystemTime,
+}
+
+impl PreCommitMetadata {
+    fn finalize(self, digest: Generation) -> CommitMetadata {
+        CommitMetadata {
+            digest,
+            previous: self.previous,
+            message: self.message,
+            time: self.time,
+        }
+    }
+}
 
 /// All fields of this struct are hashed into `digest` to make a
 /// [`Generation`]
+#[serde_as]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CommitMetadata {
     digest: Generation,
     previous: Option<Generation>,
     message: Option<String>,
-    time: DateTime<Utc>,
+    #[serde_as(as = "serde_with::TimestampSecondsWithFrac<f64>")]
+    time: SystemTime,
 }
 
 /// Enum to navigate the versions that are available in an Infinitree
@@ -218,21 +242,21 @@ impl<I: Index> Infinitree<I> {
         let mut index = index::Writer::new(start_meta, self.backend.clone(), key.clone())?;
         let mut object = self.object_writer()?;
 
-        let time = Utc::now();
-        let message = message.into().map(|msg| msg.to_string());
-        let previous = self.root.commit_metadata.read().last().map(|c| c.digest);
+        let precommit = PreCommitMetadata {
+            time: SystemTime::now(),
+            message: message.into().map(|msg| msg.to_string()),
+            previous: self.root.commit_metadata.read().last().map(|c| c.digest),
+        };
         let (digest, changeset) = self.index.commit(
             &mut index,
             &mut object,
-            crate::serialize_to_vec(&(&time, &previous, &message))?,
+            crate::serialize_to_vec(&precommit)?,
         )?;
 
-        self.root.commit_metadata.write().push(CommitMetadata {
-            digest,
-            previous,
-            time,
-            message,
-        });
+        self.root
+            .commit_metadata
+            .write()
+            .push(precommit.finalize(digest));
 
         // scope for rewriting history. this is critical, the log is locked.
         {
