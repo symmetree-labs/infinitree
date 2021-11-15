@@ -183,14 +183,15 @@ mod tests {
 
         let crypto = crypto::ObjectOperations::new(key);
         let storage = Arc::new(backends::test::InMemoryBackend::default());
-        let oid = ObjectId::new(&crypto);
-
-        let chunks = ChunkMap::default();
-        chunks.insert(Digest::default(), ChunkPointer::default());
 
         let object = {
+            let oid = ObjectId::new(&crypto);
             let mut mw = super::Writer::new(oid, storage.clone(), crypto.clone()).unwrap();
             let mut transaction = mw.transaction("chunks");
+
+            let chunks = ChunkMap::default();
+            chunks.insert(Digest::default(), ChunkPointer::default());
+
             Store::execute(
                 &mut LocalField::for_field(&chunks),
                 &mut transaction,
