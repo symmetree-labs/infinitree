@@ -54,12 +54,6 @@ impl<'writer> FieldWriter for Transaction<'writer> {
 
 impl<'writer> Drop for Transaction<'writer> {
     fn drop(&mut self) {
-        eprintln!(
-            "dropping transaction: {} {}",
-            self.writer.encoder.writer().unwrap().id().to_string(),
-            self.writer.encoder.writer().unwrap().position()
-        );
-
         // unwrap here can't fail because a transaction implies
         // `current_field = Some(_)`
         self.writer
@@ -122,11 +116,6 @@ impl<'writer> Writer {
             name: name.into(),
             next: None,
         });
-        eprintln!(
-            "starting transaction: {} {:?}",
-            oid.to_string(),
-            self.current_field
-        );
 
         Transaction {
             writer: self,
@@ -149,12 +138,6 @@ impl<'writer> Writer {
             f.offset = HEADER_SIZE as u32;
         }
 
-        eprintln!(
-            "sealing {}; size: {}, {:?}",
-            object.id().to_string(),
-            end,
-            self.offsets
-        );
         let object_header = Header::new(&self.offsets, end);
         let header_bytes = serialize_to_vec(&object_header).expect("failed to write header");
 

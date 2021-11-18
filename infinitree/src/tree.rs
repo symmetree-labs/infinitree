@@ -182,8 +182,6 @@ fn open_root(
         &mut AEADReader::new(backend.clone(), master_key.get_object_key()?),
     )?;
 
-    println!("restored: {:?}", root.transaction_log.read());
-
     Ok(())
 }
 
