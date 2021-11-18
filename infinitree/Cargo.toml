@@ -16,7 +16,7 @@ readme="../README.md"
 default = ["s3", "mmap"]
 s3 = ["rusoto_core", "rusoto_s3", "tokio"]
 mmap = ["memmap2"]
-test = []
+_test = []
 
 [dependencies]
 blake2b_simd = "0.5"
@@ -53,3 +53,9 @@ memmap2 = { version = "0.5", optional = true}
 
 [dev-dependencies]
 tokio = { version = "^1", features = ["rt", "macros", "rt-multi-thread"] }
+criterion = "0.3"
+
+[[bench]]
+name = "bench"
+harness = false
+path = "../benches/bench.rs"

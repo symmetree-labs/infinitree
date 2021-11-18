@@ -50,13 +50,19 @@ pub trait Backend: Send + Sync {
     }
 }
 
-#[cfg(any(test, feature = "test"))]
+#[cfg(infinitest)]
 pub mod test {
     use super::*;
     use std::{collections::HashMap, sync::Mutex};
 
     #[derive(Clone, Default)]
     pub struct InMemoryBackend(Arc<Mutex<HashMap<ObjectId, Arc<ReadObject>>>>);
+
+    impl InMemoryBackend {
+        pub fn new() -> Arc<Self> {
+            Arc::new(InMemoryBackend::default())
+        }
+    }
 
     impl Backend for InMemoryBackend {
         fn write_object(&self, object: &WriteObject) -> Result<()> {

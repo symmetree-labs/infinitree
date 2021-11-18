@@ -178,6 +178,9 @@
 #![allow(clippy::ptr_arg)]
 #![deny()]
 
+#[cfg(bench)]
+use criterion as _;
+
 #[macro_use]
 extern crate serde_derive;
 
