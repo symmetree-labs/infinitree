@@ -1,10 +1,4 @@
-use infinitree::{
-    anyhow,
-    backends::test::InMemoryBackend,
-    backends::Directory,
-    fields::{Serialized, VersionedMap},
-    Index, Infinitree, Key,
-};
+use infinitree::{backends::test::InMemoryBackend, fields::Serialized, Index, Infinitree, Key};
 
 use criterion::{criterion_group, Criterion};
 use serde::{Deserialize, Serialize};

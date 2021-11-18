@@ -50,7 +50,7 @@ pub trait Backend: Send + Sync {
     }
 }
 
-#[cfg(infinitest)]
+#[cfg(any(test, feature = "_test"))]
 pub mod test {
     use super::*;
     use std::{collections::HashMap, sync::Mutex};

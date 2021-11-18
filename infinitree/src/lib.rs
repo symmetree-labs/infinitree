@@ -178,7 +178,7 @@
 #![allow(clippy::ptr_arg)]
 #![deny()]
 
-#[cfg(bench)]
+#[cfg(any(test, doctest, bench))]
 use criterion as _;
 
 #[macro_use]
