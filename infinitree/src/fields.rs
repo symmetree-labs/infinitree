@@ -17,8 +17,10 @@
 //! To learn more about index internals, see the module documentation
 //! in the [`index`](super) module.
 
-use crate::index::{reader, writer, FieldReader, FieldWriter, TransactionList};
-use crate::object;
+use crate::{
+    index::{reader, writer, FieldReader, TransactionList},
+    object,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{cmp::Eq, hash::Hash, sync::Arc};
 
@@ -41,6 +43,9 @@ impl<T> Key for T where T: Serialize + DeserializeOwned + Eq + Hash + Send + Syn
 mod map;
 pub use map::Map;
 
+mod list;
+pub use list::List;
+
 // mod set;
 // pub use set::Set;
 
@@ -51,9 +56,7 @@ mod serialized;
 pub use serialized::Serialized;
 
 mod versioned;
-pub use versioned::VersionedMap;
-
-pub type List<T> = Arc<parking_lot::RwLock<Vec<T>>>;
+pub use versioned::map::VersionedMap;
 
 /// Store data into the index.
 ///
@@ -349,45 +352,5 @@ where
                 self.insert(item);
             }
         }
-    }
-}
-
-impl<T> Store for LocalField<List<T>>
-where
-    T: Value,
-{
-    fn execute(
-        &mut self,
-        transaction: &mut writer::Transaction<'_>,
-        _object: &mut dyn object::Writer,
-    ) {
-        for v in self.field.read().iter() {
-            transaction.write_next(v);
-        }
-    }
-}
-
-impl<T> Collection for LocalField<List<T>>
-where
-    T: Value + Clone,
-{
-    type TransactionResolver = FirstOnly;
-
-    type Key = T;
-
-    type Serialized = T;
-
-    type Item = T;
-
-    fn key(from: &Self::Serialized) -> &Self::Key {
-        from
-    }
-
-    fn load(from: Self::Serialized, _object: &mut dyn object::Reader) -> Self::Item {
-        from
-    }
-
-    fn insert(&mut self, record: Self::Item) {
-        self.field.write().push(record);
     }
 }

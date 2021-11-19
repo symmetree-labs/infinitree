@@ -168,16 +168,18 @@ pub(crate) trait IndexExt: Index {
 mod tests {
     #[test]
     fn can_deserialize_fields() {
-        type ChunkMap = Map<Digest, ChunkPointer>;
-
-        use crate::backends;
-        use crate::crypto::{self, Digest};
-        use crate::index::*;
-        use crate::object::ObjectId;
-        use crate::ChunkPointer;
+        use crate::{
+            backends,
+            crypto::{self, Digest},
+            index::*,
+            object::ObjectId,
+            ChunkPointer,
+        };
 
         use secrecy::Secret;
         use std::sync::Arc;
+
+        type ChunkMap = Map<Digest, ChunkPointer>;
 
         let key = Secret::new(*b"abcdef1234567890abcdef1234567890");
 
