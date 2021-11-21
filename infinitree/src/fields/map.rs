@@ -211,3 +211,72 @@ where
         self.field.insert(record.0, record.1);
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::Map;
+    use crate::{
+        fields::{LocalField, SparseField, Strategy},
+        index::test::store_then_load,
+    };
+
+    #[test]
+    fn duplicate_insert_is_noop() {
+        let m = Map::<usize, String>::default();
+        assert_eq!(m.insert(1, "first".to_owned()), "first".to_owned().into());
+        assert_eq!(m.insert(1, "second".to_owned()), "first".to_owned().into());
+    }
+
+    #[test]
+    fn updating_empty_is_noop() {
+        let m = Map::<usize, String>::default();
+        assert_eq!(
+            m.update_with(&1, |_, v| *v = "first".to_owned().into()),
+            None
+        );
+    }
+
+    #[test]
+    fn store_then_confirm_then_remove() {
+        let m = Map::<usize, String>::default();
+        let first = "first".to_owned();
+        let updated = "updated".to_owned();
+        let second = "second".to_owned();
+
+        // insert
+        assert_eq!(m.insert_with(1, || first.clone()), first.clone().into());
+        assert_eq!(m.insert_with(2, || second.clone()), second.clone().into());
+
+        // get first
+        assert_eq!(m.get(&1), Some(first.clone().into()));
+
+        // contains
+        assert_eq!(m.contains(&1), true);
+        assert_eq!(m.contains(&2), true);
+
+        // update
+        assert_eq!(
+            m.update_with(&1, |_, v| {
+                *v = updated.clone().into();
+                v.clone()
+            }),
+            Some(updated.clone().into())
+        );
+        assert_eq!(m.get(&1), Some(updated.into()));
+
+        // removed
+        m.remove(&1);
+        assert_eq!(m.get(&1), None);
+
+        // second still fine
+        assert_eq!(m.get(&2), Some(second.into()));
+    }
+
+    type TestMap = Map<usize, String>;
+    fn init_map(store: &TestMap) {
+        store.insert(1, "one".to_owned());
+        store.insert(2, "two".to_owned());
+    }
+    crate::len_check_test!(TestMap, LocalField, init_map, |m: TestMap| m.len());
+    crate::len_check_test!(TestMap, SparseField, init_map, |m: TestMap| m.len());
+}
