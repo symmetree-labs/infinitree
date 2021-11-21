@@ -1,11 +1,11 @@
 use super::{Backend, BackendError, Context, Directory, Result};
 use crate::object::{Object, ObjectId, ReadBuffer, ReadObject, WriteObject};
 
-use dashmap::DashMap;
 use lru::LruCache;
 use parking_lot::RwLock;
 use rusoto_core::Region;
 use rusoto_s3::{GetObjectRequest, PutObjectOutput, PutObjectRequest, S3Client, S3};
+use scc::HashMap;
 use tokio::{
     runtime,
     task::{self, JoinHandle},
@@ -45,6 +45,7 @@ impl Backend for InMemoryS3 {
     fn write_object(&self, object: &WriteObject) -> Result<()> {
         let client = self.client.clone();
         let bucket = self.bucket.clone();
+
         let body = Some(object.as_inner().to_vec().into());
         let key = object.id().to_string();
 
@@ -139,8 +140,8 @@ impl From<DirEntry> for FileAccess {
 #[derive(Clone)]
 pub struct Cache<Upstream> {
     file_list: Arc<tokio::sync::RwLock<LruCache<ObjectId, FileAccess>>>,
-    in_flight: Arc<DashMap<ObjectId, TaskHandle>>,
-    handles: Arc<DashMap<ObjectId, JoinHandle<()>>>,
+    in_flight: Arc<HashMap<ObjectId, TaskHandle>>,
+    handles: Arc<HashMap<ObjectId, JoinHandle<()>>>,
 
     size_limit: NonZeroUsize,
     upstream: Upstream,
@@ -245,13 +246,15 @@ impl<Upstream: 'static + Backend + Clone> Backend for Cache<Upstream> {
         let cache = self.clone();
         let object = object.clone();
 
-        self.handles.insert(
-            *object.id(),
-            task::spawn(async move {
-                let _ = cache.add_new_object(&object).await;
-                cache.upstream.write_object(&object).unwrap();
-            }),
-        );
+        self.handles
+            .insert(
+                *object.id(),
+                task::spawn(async move {
+                    let _ = cache.add_new_object(&object).await;
+                    cache.upstream.write_object(&object).unwrap();
+                }),
+            )
+            .map_err(|_| BackendError::Create)?;
 
         Ok(())
     }
