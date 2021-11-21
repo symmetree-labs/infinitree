@@ -10,6 +10,7 @@ use crate::{
     Backend, Key, ObjectId,
 };
 use anyhow::Result;
+use parking_lot::RwLock;
 use serde_with::serde_as;
 use std::{sync::Arc, time::SystemTime};
 
@@ -109,7 +110,8 @@ pub struct Infinitree<I> {
     root: RootIndex,
 
     /// The Index we're currently working with.
-    index: I,
+    /// The RwLock helps lock the entire Index during a commit
+    index: RwLock<I>,
 
     /// Backend reference.
     backend: Arc<dyn Backend>,
@@ -157,7 +159,7 @@ impl<I: Index + Default> Infinitree<I> {
             root,
             backend,
             master_key,
-            index: I::default(),
+            index: I::default().into(),
             selected_gens: GenerationSet::default(),
         })
     }
@@ -194,8 +196,8 @@ impl<I: Index> Infinitree<I> {
     pub fn with_key(backend: Arc<dyn Backend>, index: I, master_key: Key) -> Self {
         Self {
             backend,
-            index,
             master_key,
+            index: index.into(),
             root: RootIndex::default(),
             selected_gens: GenerationSet::default(),
         }
@@ -245,7 +247,7 @@ impl<I: Index> Infinitree<I> {
             message: message.into().map(|msg| msg.to_string()),
             previous: self.root.commit_metadata.read().last().map(|c| c.digest),
         };
-        let (digest, changeset) = self.index.commit(
+        let (digest, changeset) = self.index.write().commit(
             &mut index,
             &mut object,
             crate::serialize_to_vec(&precommit)?,
@@ -281,7 +283,7 @@ impl<I: Index> Infinitree<I> {
 
     /// Load into memory all fields for the selected version ranges
     pub fn load_all(&mut self) -> Result<()> {
-        self.index.load_all_from(
+        self.index.write().load_all_from(
             &self.filter_generations(),
             &self.meta_reader()?,
             &mut self.object_reader()?,
@@ -296,7 +298,7 @@ impl<I: Index> Infinitree<I> {
         let mut field = field.into();
         let start_object = self.store_start_object(&field.name);
 
-        Ok(self.index.store(
+        Ok(self.index.read().store(
             &mut self.meta_writer(start_object)?,
             &mut self.object_writer()?,
             &mut field,
@@ -452,7 +454,7 @@ impl<I: Index> Infinitree<I> {
     /// By design this is read-only, as the index fields
     /// should use internal mutability and be thread-safe
     /// individually.
-    pub fn index(&self) -> &I {
-        &self.index
+    pub fn index(&self) -> parking_lot::lock_api::RwLockReadGuard<'_, parking_lot::RawRwLock, I> {
+        self.index.read()
     }
 }
