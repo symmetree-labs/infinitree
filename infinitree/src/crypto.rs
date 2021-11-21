@@ -261,7 +261,7 @@ fn derive_subkey(key: &RawKey, ctx: &[u8]) -> Result<RawKey> {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     #[test]
     fn test_object_encryption() {
         use super::{CryptoProvider, ObjectOperations};

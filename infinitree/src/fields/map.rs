@@ -116,7 +116,7 @@ where
     K: Key,
     V: Value,
 {
-    fn execute(
+    fn store(
         &mut self,
         transaction: &mut writer::Transaction<'_>,
         _object: &mut dyn object::Writer,
@@ -155,7 +155,7 @@ where
     K: Key,
     V: Value,
 {
-    fn execute(
+    fn store(
         &mut self,
         transaction: &mut writer::Transaction<'_>,
         writer: &mut dyn object::Writer,

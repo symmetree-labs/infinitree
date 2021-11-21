@@ -135,7 +135,7 @@ pub(crate) trait IndexExt: Index {
     ) -> ObjectId {
         let mut tr = index.transaction(&field.name);
 
-        field.strategy.execute(&mut tr, object);
+        field.strategy.store(&mut tr, object);
 
         tr.finish()
     }
@@ -165,37 +165,47 @@ pub(crate) trait IndexExt: Index {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn can_deserialize_fields() {
-        use crate::{
-            backends,
-            crypto::{self, Digest},
-            index::*,
-            object::ObjectId,
-            ChunkPointer,
-        };
+pub(crate) mod test {
+    use crate::{crypto::Digest, fields::Strategy, index::*, ChunkPointer};
 
+    #[macro_export]
+    macro_rules! len_check_test {
+        ( $t:ty, $strat:ty, $prep:expr, $len:expr ) => {
+            paste::paste! {
+                #[test]
+                fn [<strategy_ $strat:snake>]() {
+                    let store = $t::default();
+                    let load = $t::default();
+                    ($prep)(&store);
+
+                    store_then_load($strat::for_field(&store), $strat::for_field(&load));
+
+                    assert_eq!(($len)(load), ($len)(store));
+                }
+            }
+        };
+    }
+
+    /// Will panic if the given argument can't be stored or loaded
+    pub(crate) fn store_then_load<T: Send + Sync, S: Strategy<T> + Store + Load>(
+        mut store: S,
+        mut load: S,
+    ) -> () {
+        use crate::{backends, crypto};
         use secrecy::Secret;
         use std::sync::Arc;
 
-        type ChunkMap = Map<Digest, ChunkPointer>;
-
         let key = Secret::new(*b"abcdef1234567890abcdef1234567890");
-
         let crypto = crypto::ObjectOperations::new(key);
         let storage = Arc::new(backends::test::InMemoryBackend::default());
 
         let object = {
             let oid = ObjectId::new(&crypto);
             let mut mw = super::Writer::new(oid, storage.clone(), crypto.clone()).unwrap();
-            let mut transaction = mw.transaction("chunks");
+            let mut transaction = mw.transaction("field name");
 
-            let chunks = ChunkMap::default();
-            chunks.insert(Digest::default(), ChunkPointer::default());
-
-            Store::execute(
-                &mut LocalField::for_field(&chunks),
+            Store::store(
+                &mut store,
                 &mut transaction,
                 &mut crate::object::AEADWriter::new(storage.clone(), crypto.clone()),
             );
@@ -206,16 +216,24 @@ mod tests {
             obj
         };
 
-        let chunks_restore = ChunkMap::default();
         let mut reader = crate::object::AEADReader::new(storage.clone(), crypto.clone());
-
         Load::load(
-            &mut LocalField::for_field(&chunks_restore),
+            &mut load,
             &mut super::Reader::new(storage.clone(), crypto.clone()),
             &mut reader,
-            vec![(Digest::default(), "chunks".into(), object)],
+            vec![(Digest::default(), "field name".into(), object)],
         );
+    }
 
-        assert_eq!(chunks_restore.len(), 1);
+    #[test]
+    fn can_deserialize_fields() {
+        type ChunkMap = Map<Digest, ChunkPointer>;
+        let store = ChunkMap::default();
+        let load = ChunkMap::default();
+        store.insert(Digest::default(), ChunkPointer::default());
+
+        store_then_load(LocalField::for_field(&store), LocalField::for_field(&load));
+
+        assert_eq!(load.len(), store.len());
     }
 }

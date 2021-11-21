@@ -31,7 +31,7 @@ where
     T: Serialize + Sync,
 {
     #[inline(always)]
-    fn execute(
+    fn store(
         &mut self,
         transaction: &mut writer::Transaction<'_>,
         _object: &mut dyn object::Writer,

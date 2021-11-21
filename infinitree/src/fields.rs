@@ -73,11 +73,7 @@ pub trait Store {
     ///
     /// Typically, the [`ChunkPointer`][crate::ChunkPointer] values returned by `object`
     /// should be stored in the index.
-    fn execute(
-        &mut self,
-        transaction: &mut writer::Transaction<'_>,
-        object: &mut dyn object::Writer,
-    );
+    fn store(&mut self, transaction: &mut writer::Transaction<'_>, object: &mut dyn object::Writer);
 }
 
 /// Load all data from the index field into memory.

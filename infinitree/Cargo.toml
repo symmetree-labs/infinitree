@@ -54,6 +54,7 @@ memmap2 = { version = "0.5", optional = true}
 [dev-dependencies]
 tokio = { version = "^1", features = ["rt", "macros", "rt-multi-thread"] }
 criterion = "0.3"
+paste = "1.0"
 
 [[bench]]
 name = "bench"

@@ -276,7 +276,7 @@ where
     V: Value,
 {
     #[inline(always)]
-    fn execute(
+    fn store(
         &mut self,
         transaction: &mut writer::Transaction<'_>,
         _object: &mut dyn object::Writer,
@@ -346,7 +346,7 @@ where
     V: Value,
 {
     #[inline(always)]
-    fn execute(
+    fn store(
         &mut self,
         transaction: &mut writer::Transaction<'_>,
         writer: &mut dyn object::Writer,
@@ -374,6 +374,10 @@ where
 #[cfg(test)]
 mod test {
     use super::VersionedMap;
+    use crate::{
+        fields::{LocalField, SparseField, Strategy},
+        index::test::store_then_load,
+    };
 
     #[test]
     fn duplicate_insert_is_noop() {
@@ -454,4 +458,12 @@ mod test {
         assert_eq!(m.size(), 0);
         assert_eq!(m.is_empty(), true);
     }
+
+    type TestMap = VersionedMap<usize, String>;
+    fn init_map(store: &TestMap) {
+        store.insert(1, "one".to_owned());
+        store.insert(2, "two".to_owned());
+    }
+    crate::len_check_test!(TestMap, LocalField, init_map, |m: TestMap| m.len());
+    crate::len_check_test!(TestMap, SparseField, init_map, |m: TestMap| m.len());
 }
