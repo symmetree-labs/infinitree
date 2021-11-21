@@ -26,6 +26,15 @@ impl<T> Serialized<T> {
     }
 }
 
+impl<T> From<T> for Serialized<T>
+where
+    T: Serialize + DeserializeOwned + Sync,
+{
+    fn from(original: T) -> Self {
+        Serialized(Arc::new(original.into()))
+    }
+}
+
 impl<T> Store for LocalField<Serialized<T>>
 where
     T: Serialize + Sync,
@@ -63,10 +72,8 @@ mod test {
 
     #[test]
     fn strategy_local_field() {
-        let store = Serialized::default();
+        let store = Serialized::from(123456789);
         let load = Serialized::default();
-
-        *store.write() = 123456789;
 
         crate::index::test::store_then_load(
             LocalField::for_field(&store),
@@ -74,5 +81,6 @@ mod test {
         );
 
         assert_eq!(*store.read(), *load.read());
+        assert_eq!(*load.read(), 123456789);
     }
 }
