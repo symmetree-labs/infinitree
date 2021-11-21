@@ -55,3 +55,24 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::Serialized;
+    use crate::fields::{LocalField, Strategy};
+
+    #[test]
+    fn strategy_local_field() {
+        let store = Serialized::default();
+        let load = Serialized::default();
+
+        *store.write() = 123456789;
+
+        crate::index::test::store_then_load(
+            LocalField::for_field(&store),
+            LocalField::for_field(&load),
+        );
+
+        assert_eq!(*store.read(), *load.read());
+    }
+}
