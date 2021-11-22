@@ -12,7 +12,7 @@ use crate::{
 use anyhow::Result;
 use parking_lot::RwLock;
 use serde_with::serde_as;
-use std::{sync::Arc, time::SystemTime};
+use std::{ops::Deref, sync::Arc, time::SystemTime};
 
 /// This is primarily a serialization helper, so we can hash all of
 /// this metadata consistently with [`CommitMetadata`]
@@ -454,7 +454,7 @@ impl<I: Index> Infinitree<I> {
     /// By design this is read-only, as the index fields
     /// should use internal mutability and be thread-safe
     /// individually.
-    pub fn index(&self) -> parking_lot::lock_api::RwLockReadGuard<'_, parking_lot::RawRwLock, I> {
+    pub fn index(&self) -> impl Deref<Target = I> + '_ {
         self.index.read()
     }
 }

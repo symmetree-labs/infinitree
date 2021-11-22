@@ -5,7 +5,10 @@ use crate::{
 };
 use parking_lot::RwLock;
 use serde::{de::DeserializeOwned, Serialize};
-use std::sync::Arc;
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 /// A wrapper type that allows using any type that's serializable
 /// using serde to be used as a member of the index.
@@ -17,11 +20,11 @@ use std::sync::Arc;
 pub struct Serialized<T>(Arc<RwLock<T>>);
 
 impl<T> Serialized<T> {
-    pub fn read(&self) -> parking_lot::lock_api::RwLockReadGuard<'_, parking_lot::RawRwLock, T> {
+    pub fn read(&self) -> impl Deref<Target = T> + '_ {
         self.0.read()
     }
 
-    pub fn write(&self) -> parking_lot::lock_api::RwLockWriteGuard<'_, parking_lot::RawRwLock, T> {
+    pub fn write(&self) -> impl DerefMut<Target = T> + '_ {
         self.0.write()
     }
 }
