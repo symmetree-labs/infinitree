@@ -9,9 +9,11 @@ pub use directory::Directory;
 #[cfg(feature = "s3")]
 mod s3;
 #[cfg(feature = "s3")]
-pub use s3::Cache;
-#[cfg(feature = "s3")]
 pub use s3::InMemoryS3;
+#[cfg(feature = "tokio")]
+mod cache;
+#[cfg(feature = "tokio")]
+pub use cache::Cache;
 
 #[derive(thiserror::Error, Debug)]
 pub enum BackendError {
