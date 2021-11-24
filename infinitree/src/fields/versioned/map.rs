@@ -1,4 +1,4 @@
-use super::{store, store_if_none, Action, RawAction};
+use super::{store, Action, RawAction};
 use crate::{
     fields::{self, Collection, Key, LocalField, SparseField, Store, Value},
     index::{writer, FieldWriter},
@@ -47,28 +47,45 @@ where
     K: Key + Clone,
     V: Value,
 {
-    /// Set or overwrite a value for the given key in the map
+    /// Set `key` to `value`.
+    ///
+    /// `insert` never overwrites existing values.
+    ///
+    /// Returns either the existing value, or the newly inserted value.
+    ///
+    /// It is equivalent to calling `map.insert_with(key, move || value)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use infinitree::fields::VersionedMap;
+    ///
+    /// let m = VersionedMap::<usize, String>::default();
+    /// assert_eq!(m.insert(1, "first".to_owned()), "first".to_owned().into());
+    /// assert_eq!(m.insert(1, "second".to_owned()), "first".to_owned().into());
+    /// ```
     #[inline(always)]
     pub fn insert(&self, key: K, value: impl Into<Arc<V>>) -> Arc<V> {
-        match self.get(&key) {
-            Some(v) => v,
-            None => {
-                let new = value.into();
-
-                self.current.upsert(
-                    key,
-                    || store(new.clone()),
-                    |_, v| store_if_none(v, new.clone()),
-                );
-                new
-            }
-        }
+        self.insert_with(key, move || value)
     }
 
-    /// Call a function to set or overwrite the value at the given
-    /// `key`
+    /// Set `key` to the value returned by `new`.
+    ///
+    /// `insert` never overwrites existing values.
+    ///
+    /// Returns either the existing value, or the newly inserted value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use infinitree::fields::VersionedMap;
+    ///
+    /// let m = VersionedMap::<usize, String>::default();
+    /// assert_eq!(m.insert_with(1, || "first".to_owned()), "first".to_owned().into());
+    /// assert_eq!(m.insert_with(1, || "second".to_owned()), "first".to_owned().into());
+    /// ```
     #[inline(always)]
-    pub fn insert_with(&self, key: K, new: impl FnOnce() -> V) -> Arc<V> {
+    pub fn insert_with<T: Into<Arc<V>>, F: FnOnce() -> T>(&self, key: K, new: F) -> Arc<V> {
         match self.get(&key) {
             Some(v) => v,
             None => {
@@ -83,7 +100,7 @@ where
                         val
                     },
                     |_, v| {
-                        *v = store(new.take().unwrap()());
+                        v.get_or_insert_with(|| new.take().unwrap()().into());
                         result.set(v.clone());
                     },
                 );
@@ -94,6 +111,25 @@ where
         }
     }
 
+    /// Update the value in `key` to the one returned by the `update` closure.
+    ///
+    /// `update_with` will never insert a new value to the map.
+    ///
+    /// Returns the update value, or None if `key` does not exist in the map.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use infinitree::fields::VersionedMap;
+    ///
+    /// let m = VersionedMap::<usize, String>::default();
+    ///
+    /// assert_eq!(m.update_with(1, |_| "first".to_owned()), None);
+    ///
+    /// m.insert(1, "first".to_owned());
+    ///
+    /// assert_eq!(m.update_with(1, |_| "second".to_owned()), Some("second".to_owned().into()));
+    /// ```
     #[inline(always)]
     pub fn update_with(&self, key: K, update: impl FnOnce(Arc<V>) -> V) -> Action<V> {
         match self.get(&key) {
@@ -122,6 +158,19 @@ where
     }
 
     /// Returns the stored value for a key, or `None`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use infinitree::fields::VersionedMap;
+    ///
+    /// let m = VersionedMap::<usize, String>::default();
+    ///
+    /// assert_eq!(m.get(&1), None);
+    ///
+    /// m.insert(1, "first".to_owned());
+    /// assert_eq!(m.get(&1), Some("first".to_owned().into()));
+    /// ```
     #[inline(always)]
     pub fn get<Q>(&self, key: &Q) -> Option<Arc<V>>
     where
@@ -135,6 +184,20 @@ where
     }
 
     /// Sets the key as removed in the map
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use infinitree::fields::VersionedMap;
+    ///
+    /// let m = VersionedMap::<usize, String>::default();
+    ///
+    /// m.insert(1, "first".to_owned());
+    /// assert_eq!(m.get(&1), Some("first".to_owned().into()));
+    ///
+    /// m.remove(1);
+    /// assert_eq!(m.get(&1), None);
+    /// ```
     #[inline(always)]
     pub fn remove(&self, key: K) {
         if self.contains(&key) {
@@ -143,7 +206,20 @@ where
         }
     }
 
-    /// Returns if there's an addition for the specified key
+    /// Returns `true` if there's an addition for the specified key
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use infinitree::fields::VersionedMap;
+    ///
+    /// let m = VersionedMap::<usize, String>::default();
+    ///
+    /// assert_eq!(m.contains(&1), false);
+    /// m.insert(1, "first".to_owned());
+    ///
+    /// assert_eq!(m.contains(&1), true);
+    /// ```
     #[inline(always)]
     pub fn contains(&self, key: &K) -> bool {
         let contained = self
@@ -155,6 +231,20 @@ where
     }
 
     /// Call the function for all additive keys
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use infinitree::fields::VersionedMap;
+    ///
+    /// let m = VersionedMap::<usize, String>::default();
+    ///
+    /// m.insert(1, "first".to_owned());
+    ///
+    /// m.for_each(|k, v| {
+    ///     assert_eq!(v, &"first".to_owned());
+    /// });
+    /// ```
     #[inline(always)]
     pub fn for_each(&self, mut callback: impl FnMut(&K, &V)) {
         // note: this is copy-pasta, because the closures have
@@ -198,6 +288,8 @@ where
     }
 
     /// Returns the number of additive keys
+    ///
+    /// See [`VersionedMap::clear`] for example use.
     #[inline(always)]
     pub fn len(&self) -> usize {
         let mut stored = self.base.len();
@@ -215,12 +307,16 @@ where
     }
 
     /// Returns the number of all keys, including deletions
+    ///
+    /// See [`VersionedMap::clear`] for example use.
     #[inline(always)]
     pub fn size(&self) -> usize {
         self.base.len() + self.current.len()
     }
 
     /// Return the size of all allocated items
+    ///
+    /// See [`VersionedMap::clear`] for example use.
     #[inline(always)]
     pub fn capacity(&self) -> usize {
         self.base.capacity() + self.current.capacity()
@@ -229,6 +325,46 @@ where
     /// Free all items in the VersionedMap, _without_ tracking changes
     ///
     /// Returns the number of elements freed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use infinitree::fields::VersionedMap;
+    ///
+    /// let value = "first".to_owned();
+    /// let m = VersionedMap::<usize, String>::default();
+    ///
+    /// assert_eq!(m.is_empty(), true);
+    ///
+    /// let _ = m.insert(1, value.clone());
+    ///
+    /// assert_eq!(m.len(), 1);
+    /// assert_eq!(m.size(), 1);
+    /// assert_eq!(m.is_empty(), false);
+    ///
+    /// m.commit();
+    ///
+    /// assert_eq!(m.contains(&1), true);
+    ///
+    /// assert_eq!(m.len(), 1);
+    /// assert_eq!(m.size(), 1);
+    /// assert_eq!(m.is_empty(), false);
+    ///
+    /// m.remove(1);
+    ///
+    /// assert_eq!(m.contains(&1), false);
+    ///
+    /// assert_eq!(m.len(), 0);
+    /// assert_eq!(m.size(), 2);
+    /// assert_eq!(m.is_empty(), true);
+    ///
+    /// // Call `clear()`
+    /// assert_eq!(m.clear(), 2);
+    ///
+    /// assert_eq!(m.len(), 0);
+    /// assert_eq!(m.size(), 0);
+    /// assert_eq!(m.is_empty(), true);
+    /// ```
     #[inline(always)]
     pub fn clear(&self) -> usize {
         self.base.clear() + self.current.clear()
