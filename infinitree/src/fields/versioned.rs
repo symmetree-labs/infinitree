@@ -7,4 +7,5 @@ fn store<V>(value: impl Into<Arc<V>>) -> Action<V> {
     Some(value.into())
 }
 
+pub(crate) mod list;
 pub(crate) mod map;

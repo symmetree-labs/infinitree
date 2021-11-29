@@ -56,6 +56,7 @@ mod serialized;
 pub use serialized::Serialized;
 
 mod versioned;
+pub use versioned::list::LinkedList;
 pub use versioned::map::VersionedMap;
 
 /// Store data into the index.

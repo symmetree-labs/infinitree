@@ -1,3 +1,4 @@
+//! A concurrent, incremental HashMap implementation
 use super::{store, Action, RawAction};
 use crate::{
     fields::{self, Collection, Key, LocalField, SparseField, Store, Value},
@@ -368,6 +369,52 @@ where
     #[inline(always)]
     pub fn clear(&self) -> usize {
         self.base.clear() + self.current.clear()
+    }
+
+    /// Roll back all modification since the last commit
+    ///
+    /// Calling `rollback` also frees up memory dynamically.
+    ///
+    /// # Examples
+    /// ```
+    /// use infinitree::fields::VersionedMap;
+    ///
+    /// let value = "first".to_owned();
+    /// let m = VersionedMap::<usize, String>::default();
+    ///
+    /// assert_eq!(m.is_empty(), true);
+    ///
+    /// let _ = m.insert(1, value.clone());
+    ///
+    /// assert_eq!(m.len(), 1);
+    /// assert_eq!(m.size(), 1);
+    /// assert_eq!(m.is_empty(), false);
+    ///
+    /// m.commit();
+    ///
+    /// assert_eq!(m.contains(&1), true);
+    ///
+    /// assert_eq!(m.len(), 1);
+    /// assert_eq!(m.size(), 1);
+    /// assert_eq!(m.is_empty(), false);
+    ///
+    /// m.remove(1);
+    ///
+    /// assert_eq!(m.contains(&1), false);
+    ///
+    /// assert_eq!(m.len(), 0);
+    /// assert_eq!(m.size(), 2);
+    /// assert_eq!(m.is_empty(), true);
+    ///
+    /// // Call `rollback()`
+    /// assert_eq!(m.rollback(), 1);
+    ///
+    /// assert_eq!(m.len(), 1);
+    /// assert_eq!(m.size(), 1);
+    /// assert_eq!(m.is_empty(), false);
+    #[inline(always)]
+    pub fn rollback(&self) -> usize {
+        self.current.clear()
     }
 
     /// True if the number of additions to the map is zero
