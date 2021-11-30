@@ -61,8 +61,8 @@ pub mod test {
     pub struct InMemoryBackend(Arc<Mutex<HashMap<ObjectId, Arc<ReadObject>>>>);
 
     impl InMemoryBackend {
-        pub fn new() -> Arc<Self> {
-            Arc::new(InMemoryBackend::default())
+        pub fn new() -> Self {
+            InMemoryBackend::default()
         }
     }
 
