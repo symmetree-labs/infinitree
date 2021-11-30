@@ -9,7 +9,6 @@ use scc::{
     LinkedList as SCCLinkedList,
 };
 use std::{
-    fmt::Display,
     ops::Deref,
     sync::{atomic::Ordering, Arc},
 };
