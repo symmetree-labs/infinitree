@@ -77,21 +77,33 @@ impl<T: 'static> Deref for Node<Arc<T>> {
     }
 }
 
+struct LinkedListInner<T: 'static> {
+    last: AtomicArc<Node<Arc<T>>>,
+    commit_start: AtomicArc<Node<Arc<T>>>,
+    previous_commit_last: AtomicArc<Node<Arc<T>>>,
+    first: AtomicArc<Node<Arc<T>>>,
+}
+
+impl<T: 'static> Default for LinkedListInner<T> {
+    fn default() -> Self {
+        Self {
+            last: AtomicArc::null(),
+            commit_start: AtomicArc::null(),
+            previous_commit_last: AtomicArc::null(),
+            first: AtomicArc::null(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct LinkedList<T: 'static> {
-    last: SCCArc<AtomicArc<Node<Arc<T>>>>,
-    commit_start: SCCArc<AtomicArc<Node<Arc<T>>>>,
-    previous_commit_last: SCCArc<AtomicArc<Node<Arc<T>>>>,
-    first: SCCArc<AtomicArc<Node<Arc<T>>>>,
+    inner: SCCArc<LinkedListInner<T>>,
 }
 
 impl<T: 'static> Default for LinkedList<T> {
     fn default() -> Self {
         Self {
-            last: SCCArc::new(AtomicArc::null()),
-            commit_start: SCCArc::new(AtomicArc::null()),
-            previous_commit_last: SCCArc::new(AtomicArc::null()),
-            first: SCCArc::new(AtomicArc::null()),
+            inner: SCCArc::new(LinkedListInner::default()),
         }
     }
 }
@@ -114,6 +126,7 @@ impl<T: 'static> LinkedList<T> {
         let node = SCCArc::new(Node(AtomicArc::default(), value.into()));
 
         let _ = self
+            .inner
             .commit_start
             .compare_exchange(
                 Ptr::null(),
@@ -122,7 +135,7 @@ impl<T: 'static> LinkedList<T> {
                 Ordering::Relaxed,
             )
             .and_then(|_| {
-                self.first.compare_exchange(
+                self.inner.first.compare_exchange(
                     Ptr::null(),
                     (Some(node.clone()), Tag::None),
                     Ordering::SeqCst,
@@ -131,8 +144,9 @@ impl<T: 'static> LinkedList<T> {
             });
 
         let barrier = Barrier::new();
-        let ptr = self.last.load(Ordering::Acquire, &barrier);
-        self.last
+        let ptr = self.inner.last.load(Ordering::Acquire, &barrier);
+        self.inner
+            .last
             .swap((Some(node.clone()), Tag::None), Ordering::Release);
 
         if let Some(ptr) = ptr.as_ref() {
@@ -165,7 +179,8 @@ impl<T: 'static> LinkedList<T> {
     /// ```
     pub fn first_in_commit(&self) -> Option<Arc<T>> {
         let barrier = Barrier::new();
-        self.commit_start
+        self.inner
+            .commit_start
             .load(Ordering::Acquire, &barrier)
             .as_ref()
             .map(|node| node.1.clone())
@@ -189,7 +204,8 @@ impl<T: 'static> LinkedList<T> {
     /// ```
     pub fn first(&self) -> Option<Arc<T>> {
         let barrier = Barrier::new();
-        self.first
+        self.inner
+            .first
             .load(Ordering::Acquire, &barrier)
             .as_ref()
             .map(|node| node.1.clone())
@@ -212,7 +228,8 @@ impl<T: 'static> LinkedList<T> {
     /// ```
     pub fn last(&self) -> Option<Arc<T>> {
         let barrier = Barrier::new();
-        self.last
+        self.inner
+            .last
             .load(Ordering::Acquire, &barrier)
             .as_ref()
             .map(|node| node.1.clone())
@@ -241,9 +258,16 @@ impl<T: 'static> LinkedList<T> {
     /// ```
     pub fn commit(&self) {
         let barrier = Barrier::new();
-        let last = self.last.load(Ordering::SeqCst, &barrier).try_into_arc();
-        self.commit_start.swap((None, Tag::None), Ordering::SeqCst);
-        self.previous_commit_last
+        let last = self
+            .inner
+            .last
+            .load(Ordering::SeqCst, &barrier)
+            .try_into_arc();
+        self.inner
+            .commit_start
+            .swap((None, Tag::None), Ordering::SeqCst);
+        self.inner
+            .previous_commit_last
             .swap((last, Tag::None), Ordering::SeqCst);
     }
 
@@ -270,11 +294,14 @@ impl<T: 'static> LinkedList<T> {
     /// assert_eq!(list.last(), None);
     /// ```
     pub fn clear(&self) {
-        self.first.swap((None, Tag::None), Ordering::SeqCst);
-        self.commit_start.swap((None, Tag::None), Ordering::SeqCst);
-        self.previous_commit_last
+        self.inner.first.swap((None, Tag::None), Ordering::SeqCst);
+        self.inner
+            .commit_start
             .swap((None, Tag::None), Ordering::SeqCst);
-        self.last.swap((None, Tag::None), Ordering::SeqCst);
+        self.inner
+            .previous_commit_last
+            .swap((None, Tag::None), Ordering::SeqCst);
+        self.inner.last.swap((None, Tag::None), Ordering::SeqCst);
     }
 
     /// Move the commit pointer to the last item in the list
@@ -302,18 +329,25 @@ impl<T: 'static> LinkedList<T> {
     pub fn rollback(&self) {
         let barrier = Barrier::new();
         let last = self
+            .inner
             .previous_commit_last
             .load(Ordering::SeqCst, &barrier)
             .try_into_arc();
-        self.last.swap((last, Tag::None), Ordering::SeqCst);
-        self.commit_start.swap((None, Tag::None), Ordering::SeqCst);
+        self.inner.last.swap((last, Tag::None), Ordering::SeqCst);
+        self.inner
+            .commit_start
+            .swap((None, Tag::None), Ordering::SeqCst);
     }
 
     pub fn iter(&self) -> impl Iterator<Item = Arc<T>> {
         let barrier = Barrier::new();
         NodeIter {
             first: true,
-            current: self.first.load(Ordering::Acquire, &barrier).try_into_arc(),
+            current: self
+                .inner
+                .first
+                .load(Ordering::Acquire, &barrier)
+                .try_into_arc(),
         }
     }
 }
