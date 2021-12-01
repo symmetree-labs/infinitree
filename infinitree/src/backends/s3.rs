@@ -1,8 +1,8 @@
 use super::{Backend, BackendError, Context, Result};
 use crate::object::{Object, ObjectId, ReadBuffer, ReadObject, WriteObject};
-use parking_lot::RwLock;
 use rusoto_core::Region;
 use rusoto_s3::{GetObjectRequest, PutObjectOutput, PutObjectRequest, S3Client, S3};
+use scc::HashMap;
 use std::sync::Arc;
 use tokio::{
     runtime,
@@ -15,7 +15,7 @@ type TaskHandle = JoinHandle<anyhow::Result<PutObjectOutput>>;
 pub struct InMemoryS3 {
     client: S3Client,
     bucket: String,
-    handles: Arc<RwLock<Vec<(ObjectId, TaskHandle)>>>,
+    in_flight: Arc<HashMap<ObjectId, TaskHandle>>,
 }
 
 impl InMemoryS3 {
@@ -25,7 +25,7 @@ impl InMemoryS3 {
         Ok(Self {
             client,
             bucket,
-            handles: Arc::default(),
+            in_flight: Arc::default(),
         })
     }
 }
@@ -34,24 +34,30 @@ impl Backend for InMemoryS3 {
     fn write_object(&self, object: &WriteObject) -> Result<()> {
         let client = self.client.clone();
         let bucket = self.bucket.clone();
+        let in_flight = self.in_flight.clone();
 
         let body = Some(object.as_inner().to_vec().into());
         let key = object.id().to_string();
+        let id = *object.id();
 
-        self.handles.write().push((
-            *object.id(),
-            task::spawn(async move {
-                client
-                    .put_object(PutObjectRequest {
-                        bucket,
-                        key,
-                        body,
-                        ..Default::default()
-                    })
-                    .await
-                    .context("Failed to write object")
-            }),
-        ));
+        self.in_flight
+            .insert(
+                id,
+                task::spawn(async move {
+                    let handle = client
+                        .put_object(PutObjectRequest {
+                            bucket,
+                            key,
+                            body,
+                            ..Default::default()
+                        })
+                        .await
+                        .context("Failed to write object");
+                    in_flight.remove(&id);
+                    handle
+                }),
+            )
+            .map_err(|_| BackendError::Create)?;
 
         Ok(())
     }
@@ -62,33 +68,31 @@ impl Backend for InMemoryS3 {
             let bucket = self.bucket.clone();
             let key = id.to_string();
 
-            runtime::Handle::current().block_on(async move {
-                let s3obj = client
-                    .get_object(GetObjectRequest {
-                        bucket,
-                        key,
-                        ..GetObjectRequest::default()
-                    })
-                    .await
-                    .context("Failed to fetch object")?;
+            task::block_in_place(move || {
+                runtime::Handle::current().block_on(async move {
+                    let s3obj = client
+                        .get_object(GetObjectRequest {
+                            bucket,
+                            key,
+                            ..GetObjectRequest::default()
+                        })
+                        .await
+                        .context("Failed to fetch object")?;
 
-                let mut buf = vec![];
-                tokio::io::copy(
-                    &mut s3obj
-                        .body
-                        .context("No body for retrieved object")?
-                        .into_async_read(),
-                    &mut buf,
-                )
-                .await?;
-                Ok(buf)
+                    let mut buf = vec![];
+                    tokio::io::copy(
+                        &mut s3obj
+                            .body
+                            .context("No body for retrieved object")?
+                            .into_async_read(),
+                        &mut buf,
+                    )
+                    .await?;
+                    Ok(buf)
+                })
             })
         };
 
         Ok(Arc::new(Object::with_id(*id, ReadBuffer::new(object?))))
-    }
-
-    fn delete(&self, _objects: &[ObjectId]) -> Result<()> {
-        Ok(())
     }
 }
