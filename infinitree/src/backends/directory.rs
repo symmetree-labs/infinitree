@@ -97,6 +97,7 @@ impl Backend for Directory {
 
     fn delete(&self, objects: &[ObjectId]) -> Result<()> {
         for id in objects {
+            let _ = self.read_lru.lock().unwrap().pop(id);
             fs::remove_file(self.target.join(id.to_string()))?;
         }
 

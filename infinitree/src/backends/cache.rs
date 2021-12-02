@@ -4,7 +4,7 @@ use lru::LruCache;
 use scc::HashMap;
 use std::{
     convert::TryFrom,
-    fs::{self, read_dir, DirEntry},
+    fs::{read_dir, DirEntry},
     num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::Arc,
@@ -106,7 +106,7 @@ impl<Upstream> Cache<Upstream> {
 
             let file = self.file_list.write().await.pop(&id).unwrap();
 
-            file.delete();
+            file.delete(&self.directory)?;
             evicted.push(id);
         }
 
@@ -116,13 +116,18 @@ impl<Upstream> Cache<Upstream> {
     async fn add_new_object(&self, obj: &WriteObject) -> Result<Vec<ObjectId>> {
         if self.file_list.write().await.get(obj.id()).is_none() {
             let evicted = self.make_space_for_object().await?;
+            eprintln!(
+                "evicted: {:?}",
+                evicted.iter().map(ObjectId::to_string).collect::<Vec<_>>()
+            );
 
             self.directory.write_object(obj)?;
+            eprintln!("written {}", obj.id().to_string());
 
             self.file_list
                 .write()
                 .await
-                .put(*obj.id(), FileAccess::new(*obj.id(), self.directory.path()));
+                .put(*obj.id(), FileAccess::new(*obj.id()));
 
             return Ok(evicted);
         }
@@ -191,23 +196,18 @@ impl<Upstream: 'static + Backend + Clone> Backend for Cache<Upstream> {
 struct FileAccess {
     atime: SystemTime,
     id: ObjectId,
-    path: PathBuf,
 }
 
 impl FileAccess {
-    fn new(id: ObjectId, path: impl AsRef<Path>) -> Self {
-        let mut path = path.as_ref().to_owned();
-        path.push(id.to_string());
-
+    fn new(id: ObjectId) -> Self {
         Self {
             id,
-            path,
             atime: SystemTime::now(),
         }
     }
 
-    fn delete(self) {
-        fs::remove_file(self.path).unwrap();
+    fn delete(self, directory: &Directory) -> Result<()> {
+        directory.delete(&[self.id])
     }
 }
 
@@ -217,7 +217,7 @@ impl From<DirEntry> for FileAccess {
         let path = direntry.path();
         let id = ObjectId::try_from(path.file_name().unwrap().to_str().unwrap()).unwrap();
 
-        Self { atime, id, path }
+        Self { atime, id }
     }
 }
 
@@ -252,7 +252,6 @@ mod test {
         write_and_wait_for_commit(&backend, &object);
 
         let test_filename = data_root.join(id_1.to_string());
-
         // 1st one is evicted automatically, hence `unwrap_err()`
         std::fs::remove_file(test_filename).unwrap_err();
 
