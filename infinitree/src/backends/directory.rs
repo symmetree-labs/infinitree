@@ -9,38 +9,85 @@ use std::{
 };
 
 #[cfg(feature = "mmap")]
-struct MmappedFile {
-    mmap: memmap2::Mmap,
-    _file: std::fs::File,
-}
+mod mmap {
+    use super::Result;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        sync::atomic::{AtomicBool, Ordering},
+    };
 
-#[cfg(feature = "mmap")]
-impl MmappedFile {
-    fn new(len: usize, _file: std::fs::File) -> Result<Self> {
-        let mmap = unsafe {
-            memmap2::MmapOptions::new()
-                .len(len)
-                .populate()
-                .map(&_file)?
-        };
-        Ok(Self { mmap, _file })
+    pub(super) struct MmappedFile {
+        mmap: memmap2::Mmap,
+        _file: std::fs::File,
+        delete: LazyDrop,
     }
-}
 
-#[cfg(feature = "mmap")]
-impl AsRef<[u8]> for MmappedFile {
+    impl MmappedFile {
+        fn new(len: usize, path: impl AsRef<Path>) -> Result<Self> {
+            let _file = fs::File::open(path.as_ref())?;
+            let mmap = unsafe {
+                memmap2::MmapOptions::new()
+                    .len(len)
+                    .populate()
+                    .map(&_file)?
+            };
+            Ok(Self {
+                mmap,
+                _file,
+                delete: LazyDrop::new(path.as_ref().to_owned()),
+            })
+        }
+
+        #[allow(unused)]
+        pub(super) fn mark_for_delete(&self) {
+            self.delete.mark_for_delete();
+        }
+    }
+
+    impl AsRef<[u8]> for MmappedFile {
+        #[inline(always)]
+        fn as_ref(&self) -> &[u8] {
+            self.mmap.as_ref()
+        }
+    }
+
+    struct LazyDrop {
+        path: PathBuf,
+        delete_on_drop: AtomicBool,
+    }
+
+    impl LazyDrop {
+        fn new(path: PathBuf) -> Self {
+            Self {
+                path,
+                delete_on_drop: false.into(),
+            }
+        }
+
+        #[allow(unused)]
+        fn mark_for_delete(&self) {
+            self.delete_on_drop.store(true, Ordering::Relaxed);
+        }
+    }
+
+    impl Drop for LazyDrop {
+        fn drop(&mut self) {
+            if self.delete_on_drop.load(Ordering::Relaxed) {
+                let _ = fs::remove_file(&self.path);
+            }
+        }
+    }
+
     #[inline(always)]
-    fn as_ref(&self) -> &[u8] {
-        self.mmap.as_ref()
+    pub(super) fn get_buf(filename: impl AsRef<Path>) -> Result<MmappedFile> {
+        let mmap = MmappedFile::new(crate::BLOCK_SIZE, &filename)?;
+        Ok(mmap)
     }
 }
 
 #[cfg(feature = "mmap")]
-#[inline(always)]
-fn get_buf(filename: impl AsRef<Path>) -> Result<ReadBuffer> {
-    let mmap = MmappedFile::new(crate::BLOCK_SIZE, fs::File::open(filename)?)?;
-    Ok(ReadBuffer::new(mmap))
-}
+use mmap::get_buf;
 
 #[cfg(not(feature = "mmap"))]
 #[inline(always)]
@@ -48,10 +95,16 @@ fn get_buf(filename: impl AsRef<Path>) -> Result<ReadBuffer> {
     Ok(ReadBuffer::new(fs::read(&filename)?))
 }
 
+#[cfg(not(feature = "mmap"))]
+type Buffer = ReadObject;
+
+#[cfg(feature = "mmap")]
+type Buffer = mmap::MmappedFile;
+
 #[derive(Clone)]
 pub struct Directory {
     target: PathBuf,
-    read_lru: Arc<Mutex<LruCache<ObjectId, Arc<ReadObject>>>>,
+    read_lru: Arc<Mutex<LruCache<ObjectId, Arc<Buffer>>>>,
 }
 
 impl Directory {
@@ -82,19 +135,35 @@ impl Backend for Directory {
         };
 
         match lru {
-            Some(buffer) => Ok(buffer),
+            Some(handle) => Ok(Object::with_id(*id, ReadBuffer::with_inner(handle)).into()),
             None => {
-                let obj = Arc::new(Object::with_id(
-                    *id,
-                    get_buf(self.target.join(id.to_string()))?,
-                ));
+                let path = self.target.join(id.to_string());
+                let buffer = Arc::new(get_buf(&path)?);
 
-                self.read_lru.lock().unwrap().put(*id, obj.clone());
-                Ok(obj)
+                self.read_lru.lock().unwrap().put(*id, buffer.clone());
+                Ok(Object::with_id(*id, ReadBuffer::with_inner(buffer)).into())
             }
         }
     }
 
+    #[cfg(all(windows, feature = "mmap"))]
+    fn delete(&self, objects: &[ObjectId]) -> Result<()> {
+        use super::BackendError;
+
+        for id in objects {
+            self.read_lru
+                .lock()
+                .unwrap()
+                .pop(id)
+                .ok_or(BackendError::NotFound { id: *id })
+                .and_then(|handle| Ok(handle.mark_for_delete()))
+                .or_else(|_| fs::remove_file(self.target.join(id.to_string())))?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(all(windows, feature = "mmap")))]
     fn delete(&self, objects: &[ObjectId]) -> Result<()> {
         for id in objects {
             let _ = self.read_lru.lock().unwrap().pop(id);
@@ -102,5 +171,64 @@ impl Backend for Directory {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        backends::{Backend, Directory},
+        object::{Object, ReadBuffer, WriteObject},
+        TEST_DATA_DIR,
+    };
+    use std::{
+        env,
+        path::{Path, PathBuf},
+        sync::Arc,
+    };
+
+    #[test]
+    #[cfg(all(windows, feature = "mmap"))]
+    fn write_read_delete() {
+        let (_obj_1_read_ref, test_filename) = write_object_get_ref_then_delete("dir-win-mmap");
+
+        // if mmap'd, windows maintains a lock on the file
+        assert_eq!(test_filename.exists(), true);
+        drop(_obj_1_read_ref);
+        assert_eq!(test_filename.exists(), false);
+    }
+
+    #[test]
+    #[cfg(not(all(windows, feature = "mmap")))]
+    fn write_read_delete() {
+        let (_obj_1_read_ref, test_filename) = write_object_get_ref_then_delete("dir");
+
+        // if not mmap'd, there should be no lock held on the file
+        // posix allows deleting open files
+        assert_eq!(test_filename.exists(), false);
+        drop(_obj_1_read_ref);
+        assert_eq!(test_filename.exists(), false);
+    }
+
+    fn write_object_get_ref_then_delete(
+        dir_name: &'static str,
+    ) -> (Arc<Object<ReadBuffer>>, PathBuf) {
+        let mut object = WriteObject::default();
+        let data_root = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join(TEST_DATA_DIR)
+            .join(dir_name);
+        std::fs::create_dir_all(&data_root).unwrap();
+
+        let backend = Directory::new(&data_root).unwrap();
+        let id_1 = *object.id();
+
+        object.set_id(id_1);
+        backend.write_object(&object).unwrap();
+
+        let obj_1_read_ref = backend.read_object(object.id()).unwrap();
+        backend.delete(&[id_1]).unwrap();
+
+        let test_filename = data_root.join(id_1.to_string());
+        (obj_1_read_ref, test_filename)
     }
 }

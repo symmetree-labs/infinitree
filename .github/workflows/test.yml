@@ -39,7 +39,6 @@ jobs:
           - windows-latest
         rust:
           - 1.56.0 # MSRV
-          - stable
     runs-on: ${{ matrix.platform }}
     steps:
     - uses: actions/checkout@v2
@@ -50,3 +49,23 @@ jobs:
         profile: minimal
     - run: cargo test --all-features
     - run: cargo bench --all-features
+
+  test-no-mmap:
+    strategy:
+      matrix:
+        platform:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        rust:
+          - 1.56.0 # MSRV
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        profile: minimal
+    - run: cargo test --no-default-features --features=_test,tokio,s3
+    - run: cargo bench --no-default-features --features=_test,tokio,s3

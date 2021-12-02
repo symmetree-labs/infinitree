@@ -116,13 +116,7 @@ impl<Upstream> Cache<Upstream> {
     async fn add_new_object(&self, obj: &WriteObject) -> Result<Vec<ObjectId>> {
         if self.file_list.write().await.get(obj.id()).is_none() {
             let evicted = self.make_space_for_object().await?;
-            eprintln!(
-                "evicted: {:?}",
-                evicted.iter().map(ObjectId::to_string).collect::<Vec<_>>()
-            );
-
             self.directory.write_object(obj)?;
-            eprintln!("written {}", obj.id().to_string());
 
             self.file_list
                 .write()
@@ -234,25 +228,31 @@ mod test {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn write_twice_and_evict() {
         let mut object = crate::object::WriteObject::default();
+
+        let data_root = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join(TEST_DATA_DIR)
+            .join("cache");
+        std::fs::create_dir_all(&data_root).unwrap();
+
         let backend = Cache::new(
-            TEST_DATA_DIR,
+            &data_root,
             NonZeroUsize::new(4).unwrap(),
             InMemoryBackend::new(),
         )
         .unwrap();
-        let data_root = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).join(TEST_DATA_DIR);
 
         let id_1 = *object.id();
         let id_2 = ObjectId::from_bytes(b"1234567890abcdef1234567890abcdef");
 
         write_and_wait_for_commit(&backend, &object);
-        backend.read_object(object.id()).unwrap();
+        let _obj_1_read_ref = backend.read_object(object.id()).unwrap();
 
         object.set_id(id_2);
         write_and_wait_for_commit(&backend, &object);
 
         let test_filename = data_root.join(id_1.to_string());
         // 1st one is evicted automatically, hence `unwrap_err()`
+        // on windows/mmap feature set, the handle is locked, therefore it's error to delete
         std::fs::remove_file(test_filename).unwrap_err();
 
         let test_filename = data_root.join(id_2.to_string());

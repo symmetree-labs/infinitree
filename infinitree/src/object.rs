@@ -8,7 +8,7 @@ use crate::{
 
 use thiserror::Error;
 
-use std::{io, mem::size_of};
+use std::{io, mem::size_of, sync::Arc};
 
 mod reader;
 pub use reader::{AEADReader, Reader};
@@ -61,7 +61,7 @@ pub type ReadObject = Object<ReadBuffer>;
 #[derive(Clone)]
 pub struct BlockBuffer(Box<[u8]>);
 pub struct ReadBuffer(ReadBufferInner);
-type ReadBufferInner = Box<dyn AsRef<[u8]> + Send + Sync + 'static>;
+type ReadBufferInner = Arc<dyn AsRef<[u8]> + Send + Sync + 'static>;
 
 impl<RO> From<RO> for WriteObject
 where
@@ -84,13 +84,17 @@ where
     fn from(rwr: WO) -> ReadObject {
         let rw = rwr.as_ref();
 
-        Object::with_id(rw.id, ReadBuffer(Box::new(rw.buffer.clone())))
+        Object::with_id(rw.id, ReadBuffer(Arc::new(rw.buffer.clone())))
     }
 }
 
 impl ReadBuffer {
     pub fn new(buf: impl AsRef<[u8]> + Send + Sync + 'static) -> ReadBuffer {
-        ReadBuffer(Box::new(buf))
+        ReadBuffer(Arc::new(buf))
+    }
+
+    pub fn with_inner(buf: Arc<dyn AsRef<[u8]> + Send + Sync + 'static>) -> ReadBuffer {
+        ReadBuffer(buf)
     }
 }
 
