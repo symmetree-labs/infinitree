@@ -18,7 +18,7 @@ use tokio::{
 #[derive(Clone)]
 pub struct Cache<Upstream> {
     file_list: Arc<tokio::sync::RwLock<LruCache<ObjectId, FileAccess>>>,
-    in_flight: Arc<HashMap<ObjectId, JoinHandle<()>>>,
+    in_flight: Arc<HashMap<ObjectId, Option<JoinHandle<()>>>>,
 
     size_limit: NonZeroUsize,
     upstream: Upstream,
@@ -98,10 +98,10 @@ impl<Upstream> Cache<Upstream> {
             // implies `files.len()` is 0, while `size_limit` is
             // non-zero, therefore we won't enter the loop
             let id = *self.file_list.read().await.peek_lru().unwrap().0;
-            if let Some((_, future)) = self.in_flight.remove(&id) {
+            if let Some((_, Some(future))) = self.in_flight.remove(&id) {
                 // can't start deleting objects during a pending
                 // up-stream transaction
-                future.await.context("In-flight transaction failed")?;
+                future.await.context("In-flight transaction failed")?
             }
 
             let file = self.file_list.write().await.pop(&id).unwrap();
@@ -139,11 +139,11 @@ impl<Upstream: 'static + Backend + Clone> Backend for Cache<Upstream> {
         self.in_flight
             .insert(
                 *object.id(),
-                task::spawn(async move {
+                Some(task::spawn(async move {
                     let _ = cache.add_new_object(&object).await;
                     cache.upstream.write_object(&object).unwrap();
                     cache.in_flight.remove(object.id());
-                }),
+                })),
             )
             .map_err(|_| BackendError::Create)?;
 
@@ -169,6 +169,22 @@ impl<Upstream: 'static + Backend + Clone> Backend for Cache<Upstream> {
                 }
             })
         })
+    }
+
+    fn sync(&self) -> Result<()> {
+        let mut handles = vec![];
+        self.in_flight.for_each(|_, v| {
+            if let Some(handle) = std::mem::take(v) {
+                handles.push(handle);
+            }
+        });
+
+        task::block_in_place(move || {
+            runtime::Handle::current().block_on(async move {
+                futures::future::join_all(handles.into_iter()).await;
+            })
+        });
+        Ok(())
     }
 }
 
@@ -213,9 +229,9 @@ mod test {
         object::{BlockBuffer, Object},
         ObjectId, TEST_DATA_DIR,
     };
-    use std::num::NonZeroUsize;
+    use std::{num::NonZeroUsize, path::Path};
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn write_twice_and_evict() {
         let mut object = crate::object::WriteObject::default();
         let backend = Cache::new(
@@ -234,19 +250,18 @@ mod test {
         object.set_id(id_2);
         write_and_wait_for_commit(&backend, &object);
 
-        let test_filename = format!("{}/{}", TEST_DATA_DIR, id_1.to_string());
+        let test_filename = Path::new(TEST_DATA_DIR).join(id_1.to_string());
+
         // 1st one is evicted automatically, hence `unwrap_err()`
         std::fs::remove_file(test_filename).unwrap_err();
 
-        let test_filename = format!("{}/{}", TEST_DATA_DIR, id_2.to_string());
+        let test_filename = Path::new(TEST_DATA_DIR).join(id_2.to_string());
         // 2nd one still lingering, we clean that up manually
         std::fs::remove_file(test_filename).unwrap();
     }
 
     fn write_and_wait_for_commit(backend: &Cache<InMemoryBackend>, object: &Object<BlockBuffer>) {
         backend.write_object(object).unwrap();
-        while backend.in_flight.len() != 0 {
-            std::thread::yield_now();
-        }
+        backend.sync().unwrap();
     }
 }

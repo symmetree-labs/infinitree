@@ -15,7 +15,7 @@ type TaskHandle = JoinHandle<anyhow::Result<PutObjectOutput>>;
 pub struct InMemoryS3 {
     client: S3Client,
     bucket: String,
-    in_flight: Arc<HashMap<ObjectId, TaskHandle>>,
+    in_flight: Arc<HashMap<ObjectId, Option<TaskHandle>>>,
 }
 
 impl InMemoryS3 {
@@ -43,7 +43,7 @@ impl Backend for InMemoryS3 {
         self.in_flight
             .insert(
                 id,
-                task::spawn(async move {
+                Some(task::spawn(async move {
                     let handle = client
                         .put_object(PutObjectRequest {
                             bucket,
@@ -55,7 +55,7 @@ impl Backend for InMemoryS3 {
                         .context("Failed to write object");
                     in_flight.remove(&id);
                     handle
-                }),
+                })),
             )
             .map_err(|_| BackendError::Create)?;
 
@@ -94,5 +94,21 @@ impl Backend for InMemoryS3 {
         };
 
         Ok(Arc::new(Object::with_id(*id, ReadBuffer::new(object?))))
+    }
+
+    fn sync(&self) -> Result<()> {
+        let mut handles = vec![];
+        self.in_flight.for_each(|_, v| {
+            if let Some(handle) = std::mem::take(v) {
+                handles.push(handle);
+            }
+        });
+
+        task::block_in_place(move || {
+            runtime::Handle::current().block_on(async move {
+                futures::future::join_all(handles.into_iter()).await;
+            })
+        });
+        Ok(())
     }
 }
