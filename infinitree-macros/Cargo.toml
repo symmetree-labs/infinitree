@@ -2,7 +2,7 @@
 name = "infinitree-macros"
 authors = ["Peter Parkanyi <p@symmetree.dev>"]
 description = "Embedded, encrypted database with tiered cache"
-version = "0.2.1"
+version = "0.3.0"
 keywords = ["crypto", "database", "cache", "sqlite", "rocksdb"]
 categories = ["database-implementations", "concurrency", "data-structures", "algorithms", "caching"]
 homepage = "https://symmetree.dev"
@@ -19,7 +19,7 @@ quote = "1"
 syn = "1"
 
 [dev-dependencies]
-infinitree = { path = "../infinitree", version = "0.2"}
+infinitree = { path = "../infinitree", version = "0.3"}
 serde = "1"
 
 [lib]
