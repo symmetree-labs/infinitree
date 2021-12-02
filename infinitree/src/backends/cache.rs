@@ -140,7 +140,7 @@ impl<Upstream: 'static + Backend + Clone> Backend for Cache<Upstream> {
             .insert(
                 *object.id(),
                 Some(task::spawn(async move {
-                    let _ = cache.add_new_object(&object).await;
+                    cache.add_new_object(&object).await.unwrap();
                     cache.upstream.write_object(&object).unwrap();
                     cache.in_flight.remove(object.id());
                 })),
