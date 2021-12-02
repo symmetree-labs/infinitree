@@ -64,6 +64,10 @@ pub mod test {
         pub fn new() -> Self {
             InMemoryBackend::default()
         }
+
+        pub fn shared() -> Arc<Self> {
+            Arc::new(InMemoryBackend::default())
+        }
     }
 
     impl Backend for InMemoryBackend {

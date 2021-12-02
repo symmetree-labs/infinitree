@@ -1,7 +1,6 @@
 use infinitree::{backends::test::InMemoryBackend, fields::Serialized, Index, Infinitree, Key};
 
 use criterion::{criterion_group, Criterion};
-use serde::{Deserialize, Serialize};
 
 criterion_group!(tree, empty_commit, empty_open, load_1_value);
 
@@ -13,7 +12,7 @@ pub struct Measurements {
 fn empty_commit(c: &mut Criterion) {
     c.bench_function("commit empty in-memory", |b| {
         let mut tree = Infinitree::<Measurements>::empty(
-            InMemoryBackend::new(),
+            InMemoryBackend::shared(),
             Key::from_credentials("username", "password").unwrap(),
         );
 
@@ -26,7 +25,7 @@ fn empty_commit(c: &mut Criterion) {
 fn empty_open(c: &mut Criterion) {
     c.bench_function("open empty tree", |b| {
         let backend = {
-            let b = InMemoryBackend::new();
+            let b = InMemoryBackend::shared();
             let mut tree = Infinitree::<Measurements>::empty(
                 b.clone(),
                 Key::from_credentials("username", "password").unwrap(),
@@ -49,7 +48,7 @@ fn empty_open(c: &mut Criterion) {
 fn load_1_value(c: &mut Criterion) {
     c.bench_function("load usize as index", |b| {
         let mut tree = Infinitree::<Measurements>::empty(
-            InMemoryBackend::new(),
+            InMemoryBackend::shared(),
             Key::from_credentials("username", "password").unwrap(),
         );
         tree.commit("empty commit yay").unwrap();
