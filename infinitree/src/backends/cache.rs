@@ -229,7 +229,7 @@ mod test {
         object::{BlockBuffer, Object},
         ObjectId, TEST_DATA_DIR,
     };
-    use std::{num::NonZeroUsize, path::Path};
+    use std::{env, num::NonZeroUsize, path::Path};
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn write_twice_and_evict() {
@@ -240,6 +240,7 @@ mod test {
             InMemoryBackend::new(),
         )
         .unwrap();
+        let data_root = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).join(TEST_DATA_DIR);
 
         let id_1 = *object.id();
         let id_2 = ObjectId::from_bytes(b"1234567890abcdef1234567890abcdef");
@@ -250,12 +251,12 @@ mod test {
         object.set_id(id_2);
         write_and_wait_for_commit(&backend, &object);
 
-        let test_filename = Path::new(TEST_DATA_DIR).join(id_1.to_string());
+        let test_filename = data_root.join(id_1.to_string());
 
         // 1st one is evicted automatically, hence `unwrap_err()`
         std::fs::remove_file(test_filename).unwrap_err();
 
-        let test_filename = Path::new(TEST_DATA_DIR).join(id_2.to_string());
+        let test_filename = data_root.join(id_2.to_string());
         // 2nd one still lingering, we clean that up manually
         std::fs::remove_file(test_filename).unwrap();
     }
