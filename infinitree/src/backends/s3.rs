@@ -1,5 +1,6 @@
-use super::{Backend, BackendError, Context, Result};
+use super::{Backend, BackendError, Result};
 use crate::object::{Object, ObjectId, ReadBuffer, ReadObject, WriteObject};
+use anyhow::Context;
 use rusoto_core::Region;
 use rusoto_s3::{GetObjectRequest, PutObjectOutput, PutObjectRequest, S3Client, S3};
 use scc::HashMap;

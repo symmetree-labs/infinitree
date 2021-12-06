@@ -1,6 +1,5 @@
 //! Backends work with underlying persistence layers, such as directories, S3, etc.
 use crate::object::{ObjectId, ReadObject, WriteObject};
-use anyhow::Context;
 use std::{io, sync::Arc};
 
 mod directory;

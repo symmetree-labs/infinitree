@@ -1,5 +1,6 @@
-use super::{Backend, BackendError, Context, Directory, Result};
+use super::{Backend, BackendError, Directory, Result};
 use crate::object::{ObjectId, ReadObject, WriteObject};
+use anyhow::Context;
 use lru::LruCache;
 use scc::HashMap;
 use std::{

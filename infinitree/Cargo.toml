@@ -13,10 +13,14 @@ build = "build.rs"
 readme="../README.md"
 
 [features]
-default = ["s3", "mmap"]
-s3 = ["rusoto_core", "rusoto_s3", "tokio"]
+default = ["mmap"]
 mmap = ["memmap2"]
-_test = []
+s3 = ["tokio", "rusoto_core", "rusoto_s3"]
+rustls = ["rusoto_core/rustls", "rusoto_s3/rustls"]
+native-tls = ["rusoto_core/native-tls", "rusoto_s3/native-tls"]
+
+# internal use only
+_test = ["s3", "native-tls"]
 
 [dependencies]
 blake2b_simd = "1"
@@ -44,15 +48,14 @@ zeroize = "^1"
 
 infinitree-macros = { version = "0.3", path = "../infinitree-macros" }
 
-rusoto_core = { version="0.47", default_features=false, features=["rustls"], optional = true }
-rusoto_s3 = { version="0.47", default_features=false, features=["rustls"], optional = true }
+rusoto_core = { version="0.47", default_features=false, optional = true }
+rusoto_s3 = { version="0.47", default_features=false, optional = true }
 tokio = { version = "^1", features = ["rt", "macros", "rt-multi-thread"], optional = true }
 futures = "0.3"
 
 memmap2 = { version = "0.5", optional = true}
 
 [dev-dependencies]
-tokio = { version = "^1", features = ["rt", "macros", "rt-multi-thread"] }
 criterion = "0.3"
 paste = "1.0"
 

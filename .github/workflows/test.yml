@@ -28,7 +28,7 @@ jobs:
     - uses: actions-rs/clippy-check@v1
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
-        args: --all-features
+        args: --features=_test,mmap
 
   test:
     strategy:
@@ -47,8 +47,8 @@ jobs:
         toolchain: stable
         override: true
         profile: minimal
-    - run: cargo test --all-features
-    - run: cargo bench --all-features
+    - run: cargo test --no-default-features --features=_test,mmap
+    - run: cargo bench --no-default-features --features=_test,mmap
 
   test-no-mmap:
     strategy:
@@ -67,5 +67,5 @@ jobs:
         toolchain: stable
         override: true
         profile: minimal
-    - run: cargo test --no-default-features --features=_test,tokio,s3
-    - run: cargo bench --no-default-features --features=_test,tokio,s3
+    - run: cargo test --no-default-features --features=_test
+    - run: cargo bench --no-default-features --features=_test

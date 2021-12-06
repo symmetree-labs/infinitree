@@ -180,6 +180,9 @@
 #[cfg(any(test, doctest, bench))]
 use criterion as _;
 
+#[cfg(not(feature = "tokio"))]
+use futures as _;
+
 #[macro_use]
 extern crate serde_derive;
 
