@@ -180,8 +180,11 @@
 #[cfg(any(test, doctest, bench))]
 use criterion as _;
 
-#[cfg(not(feature = "tokio"))]
-use futures as _;
+#[cfg(all(any(test, doctest, bench), not(feature = "s3")))]
+use s3_server as _;
+
+#[cfg(all(any(test, doctest, bench), not(feature = "s3")))]
+use hyper as _;
 
 #[macro_use]
 extern crate serde_derive;

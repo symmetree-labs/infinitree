@@ -13,9 +13,9 @@ build = "build.rs"
 readme="../README.md"
 
 [features]
-default = ["mmap"]
+default = ["mmap", "s3", "native-tls"]
 mmap = ["memmap2"]
-s3 = ["tokio", "rusoto_core", "rusoto_s3"]
+s3 = ["futures", "tokio", "rusoto_core", "rusoto_s3"]
 rustls = ["rusoto_core/rustls", "rusoto_s3/rustls"]
 native-tls = ["rusoto_core/native-tls", "rusoto_s3/native-tls"]
 
@@ -51,9 +51,9 @@ infinitree-macros = { version = "0.3", path = "../infinitree-macros" }
 rusoto_core = { version="0.47", default_features=false, optional = true }
 rusoto_s3 = { version="0.47", default_features=false, optional = true }
 tokio = { version = "^1", features = ["rt", "macros", "rt-multi-thread"], optional = true }
-futures = "0.3"
+futures = { version = "0.3", optional = true }
 
-memmap2 = { version = "0.5", optional = true}
+memmap2 = { version = "0.5", optional = true }
 
 [dev-dependencies]
 criterion = "0.3"
