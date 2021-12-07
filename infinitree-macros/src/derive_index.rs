@@ -93,7 +93,7 @@ pub(crate) fn expand(
             Ok(quote! {
 		#[inline]
                 pub fn #method_name(&'_ self) -> #infinitree_crate::fields::Intent<Box<#strategy<#field_ty>>> {
-		    use #infinitree_crate::fields::{Intent, Strategy};
+		    use #infinitree_crate::fields::{Intent, strategy::Strategy};
 		    Intent::new(
 			#field_name_str,
 			Box::new(#strategy::for_field(

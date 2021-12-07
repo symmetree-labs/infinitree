@@ -1,4 +1,7 @@
-use super::{FirstOnly, Load, LocalField, Store, TransactionResolver};
+use super::{
+    depth::{Depth, Snapshot},
+    Load, LocalField, Store,
+};
 use crate::{
     index::{reader, writer, FieldReader, FieldWriter},
     object,
@@ -10,8 +13,7 @@ use std::{
     sync::Arc,
 };
 
-/// A wrapper type that allows using any type that's serializable
-/// using serde to be used as a member of the index.
+/// Allows using any serializable type as a member of the index
 ///
 /// This implementation is super simplistic, and will not optimize for
 /// best performance. If you want something fancy, you are very likely
@@ -62,7 +64,7 @@ where
         _object: &mut dyn object::Reader,
         transaction_list: crate::index::TransactionList,
     ) {
-        for mut transaction in FirstOnly::resolve(index, transaction_list) {
+        for mut transaction in Snapshot::resolve(index, transaction_list) {
             *self.field.write() = transaction.read_next().unwrap();
         }
     }

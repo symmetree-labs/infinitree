@@ -82,7 +82,7 @@ mod tests {
         impl TestStruct {
             #[inline]
             pub fn unattributed(&'_ self) -> ::infinitree::fields::Intent<Box<::infinitree::fields::LocalField<ChunkIndex>>> {
-                use ::infinitree::fields::{Intent, Strategy};
+                use ::infinitree::fields::{Intent, strategy::Strategy};
                 Intent::new(
                     "unattributed",
                     Box::new(::infinitree::fields::LocalField::for_field(
@@ -92,7 +92,7 @@ mod tests {
             }
             #[inline]
             pub fn renamed_chunks(&'_ self) -> ::infinitree::fields::Intent<Box<::infinitree::fields::LocalField<ChunkIndex>>> {
-                use ::infinitree::fields::{Intent, Strategy};
+                use ::infinitree::fields::{Intent, strategy::Strategy};
                 Intent::new(
                     "renamed_chunks",
                     Box::new(::infinitree::fields::LocalField::for_field(
@@ -102,7 +102,7 @@ mod tests {
             }
             #[inline]
             pub fn strategizing(&'_ self) -> ::infinitree::fields::Intent<Box<infinitree::fields::SparseField<ChunkIndex>>> {
-                use ::infinitree::fields::{Intent, Strategy};
+                use ::infinitree::fields::{Intent, strategy::Strategy};
                 Intent::new(
                     "strategizing",
                     Box::new(infinitree::fields::SparseField::for_field(

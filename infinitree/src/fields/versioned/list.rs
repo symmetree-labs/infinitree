@@ -1,6 +1,6 @@
 //! A concurrent, incremental linked list implementation
 use crate::{
-    fields::{self, Collection, LocalField, SparseField, Store, Value},
+    fields::{depth::Incremental, Collection, LocalField, SparseField, Store, Value},
     index::{writer, FieldWriter},
     object::{self, serializer::SizedPointer, ObjectError},
 };
@@ -95,6 +95,7 @@ impl<T: 'static> Default for LinkedListInner<T> {
     }
 }
 
+/// Append-only linked list that only commits incremental changes
 #[derive(Clone)]
 pub struct LinkedList<T: 'static> {
     inner: SCCArc<LinkedListInner<T>>,
@@ -364,6 +365,8 @@ where
         for v in self.field.iter() {
             transaction.write_next(v);
         }
+
+        self.field.commit();
     }
 }
 
@@ -371,7 +374,7 @@ impl<T> Collection for LocalField<LinkedList<T>>
 where
     T: Value + Clone,
 {
-    type TransactionResolver = fields::FullHistory;
+    type Depth = Incremental;
     type Key = T;
     type Serialized = T;
     type Item = T;
@@ -412,6 +415,8 @@ where
 
             transaction.write_next(ptr);
         }
+
+        self.field.commit();
     }
 }
 
@@ -419,7 +424,7 @@ impl<T> Collection for SparseField<LinkedList<T>>
 where
     T: Value + Clone,
 {
-    type TransactionResolver = fields::FullHistory;
+    type Depth = Incremental;
     type Key = SizedPointer;
     type Serialized = SizedPointer;
     type Item = T;

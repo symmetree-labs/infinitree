@@ -6,8 +6,13 @@ use crate::{
 use scc::HashMap;
 use std::{borrow::Borrow, hash::Hash, sync::Arc};
 
-/// A multithreaded map implementation that can be freely copied and
-/// used with internal mutability across all operations.
+/// Multithreaded hash map that is always saved atomically
+///
+/// Calling [`clone()`](Map::clone) will create a reference to the
+/// same instance, and can be easily shared between threads.
+///
+/// For tracking incremental changes to your data structure, look at
+/// [`VersionedMap`](crate::fields::VersionedMap)
 #[derive(Clone, Default)]
 pub struct Map<K: 'static + Key, V: 'static + Value>(Arc<HashMap<K, Arc<V>>>);
 
@@ -132,7 +137,7 @@ where
     K: Key,
     V: Value,
 {
-    type TransactionResolver = super::FirstOnly;
+    type Depth = super::depth::Snapshot;
     type Key = K;
     type Serialized = (K, V);
     type Item = (K, V);
@@ -181,7 +186,7 @@ where
     K: Key,
     V: Value,
 {
-    type TransactionResolver = super::FirstOnly;
+    type Depth = super::depth::Snapshot;
     type Key = K;
     type Serialized = (K, SizedPointer);
     type Item = (K, V);

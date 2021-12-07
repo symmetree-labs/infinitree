@@ -2,8 +2,8 @@
 
 use crate::{
     fields::{
-        self, Collection, Intent, Load, Query, QueryAction, QueryIteratorOwned, Serialized, Store,
-        TransactionResolver,
+        self, depth::Depth, Collection, Intent, Load, Query, QueryAction, QueryIteratorOwned,
+        Serialized, Store,
     },
     index::{self, Generation, Index, IndexExt, TransactionList},
     object::{AEADReader, AEADWriter},
@@ -352,18 +352,16 @@ impl<I: Index> Infinitree<I> {
         let object = self.object_reader()?;
         let commits_for_field = self.field_for_version(&field.name);
 
-        Ok(
-            <Q as Collection>::TransactionResolver::resolve(index, commits_for_field)
-                .map(move |transaction| {
-                    QueryIteratorOwned::new(
-                        transaction,
-                        object.clone(),
-                        pred.clone(),
-                        field.strategy.as_mut(),
-                    )
-                })
-                .flatten(),
-        )
+        Ok(<Q as Collection>::Depth::resolve(index, commits_for_field)
+            .map(move |transaction| {
+                QueryIteratorOwned::new(
+                    transaction,
+                    object.clone(),
+                    pred.clone(),
+                    field.strategy.as_mut(),
+                )
+            })
+            .flatten())
     }
 
     fn store_start_object(&self, _name: &str) -> ObjectId {

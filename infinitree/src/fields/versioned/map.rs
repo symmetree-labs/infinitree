@@ -1,13 +1,20 @@
 //! A concurrent, incremental HashMap implementation
 use super::{store, Action, RawAction};
 use crate::{
-    fields::{self, Collection, Key, LocalField, SparseField, Store, Value},
+    fields::{depth::Incremental, Collection, Key, LocalField, SparseField, Store, Value},
     index::{writer, FieldWriter},
     object::{self, serializer::SizedPointer, ObjectError},
 };
 use scc::HashMap;
 use std::{borrow::Borrow, cell::Cell, hash::Hash, sync::Arc};
 
+/// HashMap that tracks incremental changes between commits
+///
+/// Calling [`clone()`](VersionedMap::clone) will create a reference to the
+/// same instance, and can be easily shared between threads.
+///
+/// To write to disk the entire content of a hash map on every commit,
+/// see [`Map`](crate::fields::Map)
 pub struct VersionedMap<K, V>
 where
     K: Key + 'static,
@@ -432,7 +439,7 @@ where
     K: Key,
     V: Value,
 {
-    type TransactionResolver = fields::FullHistory;
+    type Depth = Incremental;
     type Key = K;
     type Serialized = (K, Action<V>);
     type Item = (K, Action<V>);
@@ -477,7 +484,7 @@ where
     K: Key,
     V: Value,
 {
-    type TransactionResolver = fields::FullHistory;
+    type Depth = Incremental;
     type Key = K;
     type Serialized = (K, RawAction<SizedPointer>);
     type Item = (K, Action<V>);

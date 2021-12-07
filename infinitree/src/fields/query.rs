@@ -2,7 +2,7 @@ use super::{reader, Collection, FieldReader};
 use crate::object;
 use std::{marker::PhantomData, sync::Arc};
 
-/// Result of a query predicate.
+/// Result of a query predicate
 pub enum QueryAction {
     /// Pull the current value into memory.
     Take,

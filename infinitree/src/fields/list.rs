@@ -1,10 +1,14 @@
-use super::{Collection, FirstOnly, LocalField, SparseField, Store, Value};
+use super::{depth::Snapshot, Collection, LocalField, SparseField, Store, Value};
 use crate::{
     index::{writer, FieldWriter},
     object::{self, serializer::SizedPointer, ObjectError},
 };
 use std::sync::Arc;
 
+/// Shortcut to `Arc<RwLock<Vec<T>>>`, that can be used in an [`Index`](crate::Index)
+///
+/// This type supports all Index operations, and can be used with both
+/// [`LocalField`] and [`SparseField`] serialization strategies.
 pub type List<T> = Arc<parking_lot::RwLock<Vec<T>>>;
 
 impl<T> Store for LocalField<List<T>>
@@ -26,7 +30,7 @@ impl<T> Collection for LocalField<List<T>>
 where
     T: Value + Clone,
 {
-    type TransactionResolver = FirstOnly;
+    type Depth = Snapshot;
     type Key = T;
     type Serialized = T;
     type Item = T;
@@ -74,7 +78,7 @@ impl<T> Collection for SparseField<List<T>>
 where
     T: Value + Clone,
 {
-    type TransactionResolver = FirstOnly;
+    type Depth = Snapshot;
     type Key = SizedPointer;
     type Serialized = SizedPointer;
     type Item = T;

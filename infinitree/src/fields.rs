@@ -14,6 +14,19 @@
 //!  the object store
 //!  - [`LocalField`]: Store both the key and the value in the index.
 //!
+//! Additionally, `infinitree` can work with "snapshot" or
+//! "incremental" fields. This [`depth`] of the field will determine its
+//! behaviour during [`Load`] or [`Query`] operation.
+//!
+//! This is a detail that you need to be aware
+//! of when designing your indexes, but the implementation details are
+//! only relevant if you intend to write your own field type.
+//!
+//!  - [`Incremental`](depth::Incremental): The entire
+//! commit list will be traversed, typically useful for incremental collection types.
+//!  - [`Snapshot`](depth::Snapshot): Only the last commit is visited,
+//! restoring a point-in-time snapshot of the contents.
+//!
 //! To learn more about index internals, see the module documentation
 //! in the [`index`](super) module.
 
@@ -24,14 +37,14 @@ use crate::{
 use serde::{de::DeserializeOwned, Serialize};
 use std::{cmp::Eq, hash::Hash, sync::Arc};
 
-/// A marker trait for values that can be serialized and used as a
-/// value for an index field.
+/// Marker trait for values that can be serialized and used as a
+/// value for an index field
 ///
 /// You should generally not implement this trait as a blanket
 /// implementation will cover all types that conform.
 pub trait Value: Serialize + DeserializeOwned + Send + Sync {}
 
-/// A marker trait for value that can be used as a key in an index.
+/// Marker trait for value that can be used as a key in an index
 ///
 /// You should generally not implement this trait as a blanket
 /// implementation will cover all types that conform.
@@ -59,99 +72,16 @@ mod versioned;
 pub use versioned::list::LinkedList;
 pub use versioned::map::VersionedMap;
 
-/// Store data into the index.
-///
-/// This trait is usually implemented on a type that also implements
-/// [`Strategy`], and _not_ on the field directly.
-pub trait Store {
-    /// Store the contents of the field into the index. The field
-    /// itself needs to track whether this should be a complete
-    /// rewrite or an upsert.
-    ///
-    /// The `transaction` parameter is provided for strategies to
-    /// store values in the index, while the `object` is to store
-    /// values in the object pool.
-    ///
-    /// Typically, the [`ChunkPointer`][crate::ChunkPointer] values returned by `object`
-    /// should be stored in the index.
-    fn store(&mut self, transaction: &mut writer::Transaction<'_>, object: &mut dyn object::Writer);
-}
+pub mod depth;
+use depth::Depth;
 
-/// Load all data from the index field into memory.
-///
-/// This trait is usually implemented on a type that also implements
-/// [`Strategy`], and _not_ on the field directly.
-///
-/// In addition, `Load` has a blanket implementation for all types
-/// that implement [`Query`], so very likely you never have to
-/// manually implement this yourself.
-pub trait Load {
-    /// Execute a load action.
-    ///
-    /// The `index` and `object` readers are provided to interact with
-    /// the indexes and the object pool, respectively.
-    ///
-    /// `transaction_list` can contain any list of transactions that
-    /// this loader should restore into memory.
-    ///
-    /// Note that this is decidedly not a type safe way to interact
-    /// with a collection, and therefore it is recommended that
-    /// `transaction_list` is prepared and sanitized for the field
-    /// that's being restored.
-    fn load(
-        &mut self,
-        index: &reader::Reader,
-        object: &mut dyn object::Reader,
-        transaction_list: TransactionList,
-    );
-}
+pub mod strategy;
+#[allow(unused)]
+pub(crate) use strategy::Strategy;
+pub use strategy::{LocalField, SparseField};
 
-impl<K, T> Load for T
-where
-    T: Query<Key = K>,
-{
-    #[inline(always)]
-    fn load(
-        &mut self,
-        reader: &reader::Reader,
-        object: &mut dyn object::Reader,
-        transaction_list: TransactionList,
-    ) {
-        Query::select(self, reader, object, transaction_list, |_| {
-            QueryAction::Take
-        })
-    }
-}
-
-/// Load data into memory where a predicate indicates it's needed
-///
-/// This trait should be implemented on a type that also implements
-/// [`Strategy`], and _not_ on the field directly.
-pub trait Query {
-    /// The key that the predicate will use to decide whether to pull
-    /// more data into memory.
-    type Key;
-
-    /// Load items into memory based on a predicate
-    ///
-    /// The `index` and `object` readers are provided to interact with
-    /// the indexes and the object pool, respectively.
-    ///
-    /// `transaction_list` can contain any list of transactions that
-    /// this loader should restore into memory.
-    ///
-    /// Note that this is decidedly not a type safe way to interact
-    /// with a collection, and therefore it is recommended that
-    /// `transaction_list` is prepared and sanitized for the field
-    /// that's being restored.
-    fn select(
-        &mut self,
-        index: &reader::Reader,
-        object: &mut dyn object::Reader,
-        transaction_list: TransactionList,
-        predicate: impl Fn(&Self::Key) -> QueryAction,
-    );
-}
+pub mod intent;
+pub use intent::{Intent, Load, Query, Store};
 
 /// Query an index field, but do not automatically load it into memory
 ///
@@ -161,17 +91,17 @@ pub trait Query {
 /// This trait should be implemented on a type that also implements
 /// [`Strategy`], and _not_ on the field directly.
 pub trait Collection {
-    /// Use this resolving strategy to load the collection.
+    /// Use this strategy to load the collection.
     ///
     /// Typically this will be one of two types:
     ///
-    ///  * `FullHistory` if a collection requires
+    ///  * `Incremental` if a collection requires
     ///     crawling the full transaction history for an accurate
     ///     representation after loading.
-    ///  * `LatestOnly` if the collection is not versioned and
+    ///  * `Snapshot` if the collection is not versioned and
     ///     therefore there's no need to resolve the full the
     ///     transaction list.
-    type TransactionResolver: TransactionResolver;
+    type Depth: Depth;
 
     /// The key that the predicate will use to decide whether to pull
     /// more data into memory.
@@ -206,129 +136,6 @@ pub trait Collection {
     fn insert(&mut self, record: Self::Item);
 }
 
-pub trait TransactionResolver {
-    fn resolve<'r, R: 'r + AsRef<reader::Reader>>(
-        index: R,
-        transactions: TransactionList,
-    ) -> Box<dyn Iterator<Item = reader::Transaction> + 'r>;
-}
-
-pub struct FullHistory;
-pub struct FirstOnly;
-
-#[inline(always)]
-fn full_history<'r>(
-    index: impl AsRef<reader::Reader> + 'r,
-    transactions: TransactionList,
-) -> impl Iterator<Item = reader::Transaction> + 'r {
-    transactions
-        .into_iter()
-        .map(move |(_gen, field, objectid)| index.as_ref().transaction(field, &objectid).unwrap())
-}
-
-impl TransactionResolver for FullHistory {
-    #[inline(always)]
-    fn resolve<'r, R: 'r + AsRef<reader::Reader>>(
-        index: R,
-        transactions: TransactionList,
-    ) -> Box<dyn Iterator<Item = reader::Transaction> + 'r> {
-        Box::new(full_history(index, transactions))
-    }
-}
-
-impl TransactionResolver for FirstOnly {
-    #[inline(always)]
-    fn resolve<'r, R: 'r + AsRef<reader::Reader>>(
-        index: R,
-        transactions: TransactionList,
-    ) -> Box<dyn Iterator<Item = reader::Transaction> + 'r> {
-        Box::new(full_history(index, transactions).take(1))
-    }
-}
-
-/// A wrapper to allow working with trait objects and `impl Trait`
-/// types when accessing the index field.
-#[non_exhaustive]
-#[derive(Clone)]
-pub struct Intent<T> {
-    /// The stringy name of the field that's being accessed. This MUST
-    /// be unique within the index.
-    pub name: String,
-
-    /// The strategy for the given access that's to be executed.
-    pub strategy: T,
-}
-
-impl<T> Intent<T> {
-    /// Create a new wrapper that binds a stringy field name to an
-    /// access strategy
-    #[inline(always)]
-    pub fn new(name: impl AsRef<str>, strategy: T) -> Self {
-        Intent {
-            name: name.as_ref().to_string(),
-            strategy,
-        }
-    }
-}
-
-impl<T: Store + 'static> From<Intent<Box<T>>> for Intent<Box<dyn Store>> {
-    #[inline(always)]
-    fn from(a: Intent<Box<T>>) -> Self {
-        Intent {
-            name: a.name,
-            strategy: a.strategy,
-        }
-    }
-}
-
-impl<T: Load + 'static> From<Intent<Box<T>>> for Intent<Box<dyn Load>> {
-    #[inline(always)]
-    fn from(a: Intent<Box<T>>) -> Self {
-        Intent {
-            name: a.name,
-            strategy: a.strategy,
-        }
-    }
-}
-
-/// Allows decoupling a storage strategy for index fields from the
-/// in-memory representation.
-pub trait Strategy<T: Send + Sync>: Send + Sync {
-    /// Instantiate a new `Strategy`.
-    fn for_field(field: &T) -> Self
-    where
-        Self: Sized;
-}
-
-/// A strategy that stores values in the object pool, while keeping
-/// keys in the index
-pub struct SparseField<Field> {
-    field: Field,
-}
-
-impl<T: Send + Sync + Clone> Strategy<T> for SparseField<T> {
-    #[inline(always)]
-    fn for_field(field: &'_ T) -> Self {
-        SparseField {
-            field: field.clone(),
-        }
-    }
-}
-
-/// A strategy that stores both keys and values in the index
-pub struct LocalField<Field> {
-    field: Field,
-}
-
-impl<T: Send + Sync + Clone> Strategy<T> for LocalField<T> {
-    #[inline(always)]
-    fn for_field(field: &T) -> Self {
-        LocalField {
-            field: field.clone(),
-        }
-    }
-}
-
 impl<T> Query for T
 where
     T: Collection,
@@ -343,7 +150,7 @@ where
         predicate: impl Fn(&Self::Key) -> QueryAction,
     ) {
         let predicate = Arc::new(predicate);
-        for transaction in T::TransactionResolver::resolve(index, transaction_list) {
+        for transaction in T::Depth::resolve(index, transaction_list) {
             let iter = QueryIterator::new(transaction, object, predicate.clone(), self);
             for item in iter {
                 self.insert(item);
