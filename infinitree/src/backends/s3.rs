@@ -1,7 +1,7 @@
 use super::{Backend, BackendError, Result};
 use crate::object::{Object, ObjectId, ReadBuffer, ReadObject, WriteObject};
 use anyhow::Context;
-use rusoto_core::Region;
+pub use rusoto_core::Region;
 use rusoto_s3::{GetObjectRequest, PutObjectOutput, PutObjectRequest, S3Client, S3};
 use scc::HashMap;
 use std::sync::Arc;
@@ -111,5 +111,72 @@ impl Backend for InMemoryS3 {
             })
         });
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        backends::{test::write_and_wait_for_commit, InMemoryS3, Region},
+        object::WriteObject,
+        Backend, ObjectId, TEST_DATA_DIR,
+    };
+    use hyper::service::make_service_fn;
+    use hyper::Server;
+    use s3_server::{storages::fs::FileSystem, S3Service, SimpleAuth};
+    use std::{
+        future,
+        net::{SocketAddr, TcpListener},
+    };
+    use tokio::task;
+
+    const AWS_ACCESS_KEY_ID: &'static str = "ANTN35UAENTS5UIAEATD";
+    const AWS_SECRET_ACCESS_KEY_ID: &'static str = "TtnuieannGt2rGuie2t8Tt7urarg5nauedRndrur";
+
+    const BIND_SERVER: ([u8; 4], u16) = ([127, 0, 0, 1], 12312);
+
+    fn setup_s3_server(addr: &SocketAddr) {
+        let fs = FileSystem::new(TEST_DATA_DIR).unwrap();
+        let mut service = S3Service::new(fs);
+        let mut auth = SimpleAuth::new();
+
+        std::env::set_var("AWS_ACCESS_KEY_ID", AWS_ACCESS_KEY_ID);
+        std::env::set_var("AWS_SECRET_ACCESS_KEY", AWS_SECRET_ACCESS_KEY_ID);
+        auth.register(AWS_ACCESS_KEY_ID.into(), AWS_SECRET_ACCESS_KEY_ID.into());
+        service.set_auth(auth);
+
+        let server = {
+            let service = service.into_shared();
+            let listener = TcpListener::bind(&addr).unwrap();
+            let make_service: _ =
+                make_service_fn(move |_| future::ready(Ok::<_, anyhow::Error>(service.clone())));
+            Server::from_tcp(listener).unwrap().serve(make_service)
+        };
+
+        let _server_handle = task::spawn(server);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn s3_write_read() {
+        let addr = SocketAddr::from(BIND_SERVER);
+        let backend = InMemoryS3::new(
+            Region::Custom {
+                name: "us-east-1".into(),
+                endpoint: format!("http://{}", addr.to_string()),
+            },
+            "bucket".into(),
+        )
+        .unwrap();
+
+        setup_s3_server(&addr);
+
+        let mut object = WriteObject::default();
+        let id_2 = ObjectId::from_bytes(b"1234567890abcdef1234567890abcdef");
+
+        write_and_wait_for_commit(&backend, &object);
+        let _obj_1_read_ref = backend.read_object(object.id()).unwrap();
+
+        object.set_id(id_2);
+        write_and_wait_for_commit(&backend, &object);
     }
 }

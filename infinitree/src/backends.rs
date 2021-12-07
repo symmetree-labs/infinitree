@@ -8,7 +8,7 @@ pub use directory::Directory;
 #[cfg(feature = "s3")]
 mod s3;
 #[cfg(feature = "s3")]
-pub use s3::InMemoryS3;
+pub use s3::{InMemoryS3, Region};
 #[cfg(feature = "tokio")]
 mod cache;
 #[cfg(feature = "tokio")]
@@ -55,6 +55,12 @@ pub trait Backend: Send + Sync {
 pub mod test {
     use super::*;
     use std::{collections::HashMap, sync::Mutex};
+
+    #[allow(unused)]
+    pub(crate) fn write_and_wait_for_commit(backend: &impl Backend, object: &WriteObject) {
+        backend.write_object(object).unwrap();
+        backend.sync().unwrap();
+    }
 
     #[derive(Clone, Default)]
     pub struct InMemoryBackend(Arc<Mutex<HashMap<ObjectId, Arc<ReadObject>>>>);

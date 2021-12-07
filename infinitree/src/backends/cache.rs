@@ -220,15 +220,15 @@ impl From<DirEntry> for FileAccess {
 mod test {
     use super::Cache;
     use crate::{
-        backends::{test::InMemoryBackend, Backend},
-        object::{BlockBuffer, Object},
-        ObjectId, TEST_DATA_DIR,
+        backends::test::{write_and_wait_for_commit, InMemoryBackend},
+        object::WriteObject,
+        Backend, ObjectId, TEST_DATA_DIR,
     };
     use std::{env, num::NonZeroUsize, path::Path};
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn write_twice_and_evict() {
-        let mut object = crate::object::WriteObject::default();
+        let mut object = WriteObject::default();
 
         let data_root = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap())
             .join(TEST_DATA_DIR)
@@ -259,10 +259,5 @@ mod test {
         let test_filename = data_root.join(id_2.to_string());
         // 2nd one still lingering, we clean that up manually
         std::fs::remove_file(test_filename).unwrap();
-    }
-
-    fn write_and_wait_for_commit(backend: &Cache<InMemoryBackend>, object: &Object<BlockBuffer>) {
-        backend.write_object(object).unwrap();
-        backend.sync().unwrap();
     }
 }
