@@ -1,13 +1,11 @@
 //! Infinitree is a versioned, embedded database that uses uniform,
 //! encrypted blobs to store data.
 //!
-//! It works best for use cases with independent writer processes, as
-//! multiple writer processes on a single tree are not supported.
+//! Multiple writers can use the same storage, but not the same tree
+//! safely at the same time.
 //!
-//! In fact, calling Infinitree a database may be generous, as all
-//! persistence-related operations are explicit. Under the hood, it's
-//! using `serde` for flexibility and interoperability with the most
-//! libraries out of the box.
+//! Calling Infinitree a database may be generous, as all
+//! persistence-related operations are explicit.
 //!
 //! ## Features
 //!
@@ -15,69 +13,56 @@
 //!  * Transparently handle hot/warm/cold storage tiers; currently S3-compatible backends is supported
 //!  * Versioned data structures that can be queried using the `Iterator` trait without loading in full
 //!  * Encrypt all on-disk data, and only decrypt it on use
-//!  * Focus on performance and flexible choice of performance/memory use tradeoffs
-//!  * Extensible for custom data types and storage strategies
-//!  * Easy to integrate with cloud workers & KMS for access control
+//!  * Focus on performance and control over memory use
+//!  * Extensible for custom data types, storage backends, and serialization
 //!
 //! ## Example use
 //!
-//! ```no_run
+//! ```
 //! use infinitree::{
 //!     Infinitree,
 //!     Index,
 //!     Key,
 //!     anyhow,
 //!     backends::Directory,
-//!     fields::{Serialized, VersionedMap, LocalField},
+//!     fields::{VersionedMap},
 //! };
 //! use serde::{Serialize, Deserialize};
 //!
-//! #[derive(Serialize, Deserialize)]
-//! pub struct PlantHealth {
-//!     id: usize,
-//!     air_humidity: usize,
-//!     soil_humidity: usize,
-//!     temperature: f32
-//! }
-//!
-//! #[derive(Index, Default, Clone)]
-//! pub struct Measurements {
-//!     // rename the field when serializing
-//!     #[infinitree(name = "last_time")]
-//!     _old_last_time: Serialized<String>,
-//!
-//!     #[infinitree(name = "last_time2")]
-//!     last_time: Serialized<usize>,
-//!
-//!     // only store the keys in the index, not the values
-//!     #[infinitree(strategy = "infinitree::fields::SparseField")]
-//!     measurements: VersionedMap<usize, PlantHealth>,
-//!
-//!     // skip the next field when loading & serializing
-//!     #[infinitree(skip)]
-//!     current_time: usize,
-//! }
-//!
 //! fn main() -> anyhow::Result<()> {
-//!     let mut tree = Infinitree::<Measurements>::empty(
-//!         Directory::new("/storage")?,
+//!     let mut tree = Infinitree::<VersionedMap<String, usize>>::empty(
+//!         Directory::new("test_data")?,
 //!         Key::from_credentials("username", "password")?
 //!     );
 //!
-//!     tree.index().measurements.insert(1, PlantHealth {
-//!         id: 0,
-//!         air_humidity: 50,
-//!         soil_humidity: 60,
-//!         temperature: 23.3,
-//!     });
+//!     tree.index().insert("sample_size".into(), 1234);
 //!
-//!     *tree.index().last_time.write() = 1;
 //!     tree.commit("first measurement! yay!");
 //!     Ok(())
 //! }
 //! ```
 //!
 //! ## Core concepts
+//!
+//! [`Infinitree`] is a versioned data store interface that is the
+//! first point of contact with the library. It provides convenience
+//! functions to work on different versions of the database index, and
+//! access random access data using pointers.
+//!
+//! There are 2 types of interactions with an infinitree: one that's
+//! happening through an index, and one that's directly exposing
+//! random access data.
+//!
+//! Any data stored outside of an index will receive a `ChunkPointer`,
+//! which _must_ be stored somewhere to retrieve the data. Hence the
+//! need for an index.
+//!
+//! Indexes can be any struct that implement the [`Index`]
+//! trait. There's also a helpful [derive macro](derive@Index) that
+//! helps you do this. An index will consist of various fields, which
+//! act like regular old Rust types, but need to implement a few
+//! traits to help serialization.
+//!
 //! ### Infinitree
 //!
 //! [`Infinitree`] provides high-level versioning, querying, and key
@@ -88,55 +73,56 @@
 //! operations on the tree, and will be your first entry point when
 //! working with trees and persisting them.
 //!
-//! Persisting any [field](#fields-1) in an [Index](#index) will require
-//! an [`Intent`] to ensure the right
-//! [`Strategy`] is being used for
-//! persistence.
+//! Here you can select different versions for the index to interact
+//! with, and create new commits.
 //!
 //! ### Index
 //!
-//! In the most simplistic case, you can think about your Index as a
-//! schema for a tree.
+//! You can think about your `Index` as a schema. Or really just the
+//! central struct definition for your data.
 //!
-//! In a more complicated setup, the [`Index`] trait and
-//! corresponding [derive macro](derive@Index) represent an view into
-//! a single version of your data. Using an [`Infinitree`] you can
-//! swap between the various versions and mix-and-match data from
-//! various versions into a single Index instance.
+//! In a more abstract sense, the [`Index`] trait and corresponding
+//! [derive macro](derive@Index) represent a view into a single
+//! version of your database. Using an [`Infinitree`] you can swap
+//! between the various versions and mix-and-match data from various
+//! versions into a single `Index` instance.
 //!
-//! Interaction with Index member fields is straightforward. However,
-//! the [derive macro](derive@Index) will generate functions that
-//! produce an [`Intent`] for any operation that touches the
-//! persistence layer, such as [`Store`] and [`Load`].
+//! Interaction with `Index` member fields is straightforward. The
+//! [derive macro](derive@Index) will generate functions that produce
+//! an [`Intent`] for any operation that touches the persistence
+//! layer, such as [`Store`] and [`Load`].
 //!
 //! ### Fields
 //!
-//! An Index consists of fields. These are thread-safe data structures
-//! with internal mutation, which support some kind of serialization
-//! [`Strategy`].
+//! An `Index` contains serializable fields. These are thread-safe
+//! data structures with internal mutation, which support some kind of
+//! serialization [`Strategy`].
 //!
 //! You can use any type that implements [`serde::Serialize`] as a
-//! field, through the `fields::Serialized` wrapper type.
+//! field through the `fields::Serialized` wrapper type, but there are
+//! incremental hash map and list-like types available for you to use
+//! to track and only save changes between versions of your data.
 //!
 //! Persisting and loading fields is done using an [`Intent`]
 //! wrapper. If you use the [`Index`][derive@Index] macro, this will
 //! automatically create accessor functions for each field in an
 //! index, that return an `Intent` wrapped strategy.
 //!
-//! This is to elide the specific types and allow doing batch
-//! operations, e.g. when calling [`Infinitree::commit`] using a
-//! different strategy for each field in an Index.
+//! Intents elide the specific types of the field and allow doing
+//! batch operations, e.g. when calling [`Infinitree::commit`] using a
+//! different strategy for each field in an `Index`.
 //!
 //! ### Strategy
 //!
-//! To tell Infinitree how to serialize an field, you can use different
+//! To tell Infinitree how to serialize a field, you can use different
 //! strategies. A strategy has full control over the field and the
 //! serializers/loader transactions for it, which means you can
-//! control the performance and placement of pieces of data.
+//! control the placement of pieces of data.
 //!
-//! Every strategy receives an Index transaction, and a Object
-//! reader/writer. It is the responsibility of the strategy to store
-//! references so you can load back the data once persisted.
+//! Every strategy receives an `Index` transaction, and a
+//! [`object::Reader`] or [`object::Writer`]. It is the responsibility
+//! of the strategy to store [references](ChunkPointer) so you can
+//! load back the data once persisted.
 //!
 //! There are 2 strategies in the base library:
 //!
@@ -146,9 +132,9 @@
 //!  index. Best suited for large structs as values.
 //!
 //! Deciding which strategy is best for your use case may mean you
-//! have to run some experiments. A `SparseField` is generally useful
-//! for indexing large structs that you want to query rather than load
-//! at once.
+//! have to run some experiments and benchmarks. A `SparseField` is
+//! generally useful for indexing large structs that you want to query
+//! rather than load all at once.
 //!
 //! See the documentation for the [`Index`][derive@Index] macro to see how to
 //! use strategies.

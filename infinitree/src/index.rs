@@ -1,10 +1,58 @@
-//! Working with the index of an Infinitree.
+//! # Working with the index of an Infinitree.
 //!
-//! # Index objects and regular objects
+//! Infinitree recognizes two kinds of objects that appear on the
+//! storage medium: index, and data. From the outside, they're
+//! indistinguishible, but they work quite differently.
 //!
-//! # Efficient use of indexes
+//! Data objects are individually encrypted pieces of data with a
+//! changing key. A [`ChunkPointer`](crate::ChunkPointer) uniquely
+//! identifies a data chunk within the object pool, and you need to
+//! track these somehow.
 //!
-//! # Customizing storage strategies
+//! Index objects are basically encrypted LZ4 streams layed out across
+//! multiple blobs. These LZ4 streams are produced by serializing
+//! collections that are tracked by a `struct` which implements the
+//! [`Index`] trait.
+//!
+//! Having an `Index` for you Infinitree is essential, unless you plan
+//! to track your data using other means.
+//!
+//! ## Efficient use of indexes
+//!
+//! An index can have multiple [fields](crate::fields), which are collections or other serializable data structures.
+//!
+//! ```
+//! use infinitree::{
+//!     Index,
+//!     fields::{Serialized, VersionedMap},
+//! };
+//! use serde::{Serialize,Deserialize};
+//!
+//! #[derive(Serialize,Deserialize,Clone)]
+//! struct BigStruct;
+//!
+//! #[derive(Index, Default, Clone)]
+//! pub struct Measurements {
+//!
+//!     // Anything implementing `serde::Serialize` can be used
+//!     // through a proxy, and stored either in the index, or in the
+//!     // object pool through `SparseField`
+//!     last_time: Serialized<usize>,
+//!
+//!     // only store the keys in the index, not the values
+//!     #[infinitree(strategy = "infinitree::fields::SparseField")]
+//!     measurements: VersionedMap<usize, BigStruct>,
+//! }
+//! ```
+//!
+//! A crucial detail in choosing the right indexing strategy is
+//! exactly how much data do you want to store in index objects.
+//!
+//! It is possible to use a `SparseField` serialization strategy for
+//! most collections provided in the base library. By storing large
+//! data in the data object pool instead of index objects that are
+//! linearly read and deserialized, you can achieve measurable
+//! performance increase for certain use cases.
 
 use crate::{
     compress,
