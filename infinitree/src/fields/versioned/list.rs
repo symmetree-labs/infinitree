@@ -1,6 +1,9 @@
 //! A concurrent, incremental linked list implementation
 use crate::{
-    fields::{depth::Incremental, Collection, LocalField, SparseField, Store, Value},
+    fields::{
+        depth::Incremental, Collection, Intent, Load, LocalField, SparseField, Store, Strategy,
+        Value,
+    },
     index::{writer, FieldWriter},
     object::{self, serializer::SizedPointer, ObjectError},
 };
@@ -448,6 +451,25 @@ where
 
     fn insert(&mut self, record: Self::Item) {
         self.field.push(record);
+    }
+}
+
+impl<T> crate::Index for LinkedList<T>
+where
+    T: 'static + Value + Clone,
+{
+    fn store_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Store>>>> {
+        Ok(vec![Intent::new(
+            "root",
+            Box::new(LocalField::for_field(self)),
+        )])
+    }
+
+    fn load_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Load>>>> {
+        Ok(vec![Intent::new(
+            "root",
+            Box::new(LocalField::for_field(self)),
+        )])
     }
 }
 

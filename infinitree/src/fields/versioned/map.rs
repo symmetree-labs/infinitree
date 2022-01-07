@@ -1,7 +1,10 @@
 //! A concurrent, incremental HashMap implementation
 use super::{store, Action, RawAction};
 use crate::{
-    fields::{depth::Incremental, Collection, Key, LocalField, SparseField, Store, Value},
+    fields::{
+        depth::Incremental, Collection, Intent, Key, Load, LocalField, SparseField, Store,
+        Strategy, Value,
+    },
     index::{writer, FieldWriter},
     object::{self, serializer::SizedPointer, ObjectError},
 };
@@ -558,6 +561,26 @@ where
         });
 
         self.field.commit();
+    }
+}
+
+impl<K, V> crate::Index for VersionedMap<K, V>
+where
+    K: Key + Clone,
+    V: Value,
+{
+    fn store_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Store>>>> {
+        Ok(vec![Intent::new(
+            "root",
+            Box::new(LocalField::for_field(self)),
+        )])
+    }
+
+    fn load_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Load>>>> {
+        Ok(vec![Intent::new(
+            "root",
+            Box::new(LocalField::for_field(self)),
+        )])
     }
 }
 

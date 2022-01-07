@@ -1,4 +1,6 @@
-use super::{depth::Snapshot, Collection, LocalField, SparseField, Store, Value};
+use super::{
+    depth::Snapshot, Collection, Intent, Load, LocalField, SparseField, Store, Strategy, Value,
+};
 use crate::{
     index::{writer, FieldWriter},
     object::{self, serializer::SizedPointer, ObjectError},
@@ -102,6 +104,25 @@ where
 
     fn insert(&mut self, record: Self::Item) {
         self.field.write().push(record);
+    }
+}
+
+impl<T> crate::Index for List<T>
+where
+    T: 'static + Value + Clone,
+{
+    fn store_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Store>>>> {
+        Ok(vec![Intent::new(
+            "root",
+            Box::new(LocalField::for_field(self)),
+        )])
+    }
+
+    fn load_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Load>>>> {
+        Ok(vec![Intent::new(
+            "root",
+            Box::new(LocalField::for_field(self)),
+        )])
     }
 }
 
