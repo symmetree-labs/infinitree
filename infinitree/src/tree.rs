@@ -187,6 +187,41 @@ fn open_root(
     Ok(())
 }
 
+pub enum Message {
+    Empty,
+    Some(String),
+}
+
+impl From<&str> for Message {
+    fn from(from: &str) -> Self {
+        Self::Some(from.to_string())
+    }
+}
+
+impl From<Option<String>> for Message {
+    fn from(from: Option<String>) -> Self {
+        match from {
+            Some(s) => Self::Some(s),
+            None => Self::Empty,
+        }
+    }
+}
+
+impl From<String> for Message {
+    fn from(from: String) -> Self {
+        Self::Some(from)
+    }
+}
+
+impl Into<Option<String>> for Message {
+    fn into(self) -> Option<String> {
+        match self {
+            Self::Empty => None,
+            Self::Some(s) => Some(s),
+        }
+    }
+}
+
 impl<I: Index> Infinitree<I> {
     /// Wraps the given `index` in an Infinitree.
     ///
@@ -224,8 +259,15 @@ impl<I: Index> Infinitree<I> {
     ///
     /// Any commit message works that implements [`ToString`].
     ///
-    /// ```ignore
-    /// // No message can be given using a literal None
+    /// ```no_run
+    /// use infinitree::{Infinitree, Key, fields::Serialized, backends::Directory};
+    ///
+    /// let mut tree = Infinitree::<infinitree::fields::VersionedMap<String, String>>::empty(
+    ///     Directory::new("/storage").unwrap(),
+    ///     Key::from_credentials("username", "password").unwrap()
+    /// );
+    ///
+    /// // Commit message can be omitted using `None`
     /// tree.commit(None);
     ///
     /// // Otherwise a hardcoded &str also works
@@ -235,7 +277,7 @@ impl<I: Index> Infinitree<I> {
     /// let message = "this is a string".to_string();
     /// tree.commit(message);
     /// ```
-    pub fn commit<T: ToString>(&mut self, message: impl Into<Option<T>>) -> Result<()> {
+    pub fn commit(&mut self, message: impl Into<Message>) -> Result<()> {
         let key = self.master_key.get_meta_key()?;
         let start_meta = ObjectId::new(&key);
 
@@ -244,7 +286,7 @@ impl<I: Index> Infinitree<I> {
 
         let precommit = PreCommitMetadata {
             time: SystemTime::now(),
-            message: message.into().map(|msg| msg.to_string()),
+            message: message.into().into(),
             previous: self.root.commit_metadata.read().last().map(|c| c.digest),
         };
         let (digest, changeset) = self.index.write().commit(
