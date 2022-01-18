@@ -276,6 +276,45 @@ where
         });
     }
 
+    /// Mark values as deleted where `callback` returns `false`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use infinitree::fields::VersionedMap;
+    ///
+    /// let m = VersionedMap::<usize, String>::default();
+    ///
+    /// m.insert(1, "first".to_owned());
+    ///
+    /// m.retain(|k, v| false);
+    /// assert_eq!(m.contains(&1), false);
+    /// ```
+    #[inline(always)]
+    pub fn retain(&self, mut callback: impl FnMut(&K, &V) -> bool) {
+        // note: this is copy-pasta, because the closures have
+        // different lifetimes.
+        //
+        // if you have a good idea how to avoid
+        // using a macro and just do this, please send a PR
+
+        self.base.for_each(|k, v: &mut Action<V>| {
+            if let Some(value) = v {
+                if !(callback)(k, Arc::as_ref(value)) {
+                    self.current
+                        .upsert(k.clone(), || Action::None, |_, v| *v = Action::None)
+                }
+            }
+        });
+        self.current.for_each(|k, v: &mut Action<V>| {
+            if let Some(value) = v {
+                if !(callback)(k, Arc::as_ref(value)) {
+                    *v = Action::None
+                }
+            }
+        });
+    }
+
     /// Clear out the current changeset, and commit all changes to history.
     ///
     /// This operation potentially helps free some memory, but more
