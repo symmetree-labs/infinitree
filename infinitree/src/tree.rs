@@ -213,11 +213,11 @@ impl From<String> for Message {
     }
 }
 
-impl Into<Option<String>> for Message {
-    fn into(self) -> Option<String> {
-        match self {
-            Self::Empty => None,
-            Self::Some(s) => Some(s),
+impl From<Message> for Option<String> {
+    fn from(from: Message) -> Option<String> {
+        match from {
+            Message::Empty => None,
+            Message::Some(s) => Some(s),
         }
     }
 }
