@@ -3,7 +3,6 @@ use crate::{
     object::{ObjectId, WriteObject},
 };
 
-use blake2b_simd::blake2bp::Params as Blake2;
 use getrandom::getrandom;
 use ring::aead;
 use secrecy::{ExposeSecret, Secret};
@@ -14,10 +13,12 @@ const CRYPTO_DIGEST_SIZE: usize = 32;
 type Nonce = [u8; 12];
 type RawKey = Secret<[u8; CRYPTO_DIGEST_SIZE]>;
 
-/// A digest-like type.
-///
-/// Note that you should not rely on this type staying what it is
-/// right now. The specific type is subject to change in the future.
+// TODO: ideally this should be a tuple struct wrapping blake3::Hash,
+// implementing Serialize & Deserialize and the rest.
+//
+// That way we get constant time equality checks for free, which is
+// prudent to want, but I'm uncertain about a realistic side-channel
+// based on this right now.
 pub type Digest = [u8; CRYPTO_DIGEST_SIZE];
 pub type Tag = [u8; 16];
 
@@ -31,8 +32,6 @@ pub enum CryptoError {
 }
 pub type Result<T> = std::result::Result<T, CryptoError>;
 
-/// This is a securely stored key that's the root for crypto
-/// operations.
 pub struct Key {
     master_key: RawKey,
 }
@@ -49,19 +48,10 @@ pub struct ObjectOperations {
 pub type IndexKey = ObjectOperations;
 pub type ChunkKey = ObjectOperations;
 
-/// Cryptographically secure hash function.
-///
-/// Currently Blake2bp with a 256bit output.
 #[inline]
 pub fn secure_hash(content: &[u8]) -> Digest {
     let mut output = Digest::default();
-
-    output.copy_from_slice(
-        Blake2::new()
-            .hash_length(CRYPTO_DIGEST_SIZE)
-            .hash(content)
-            .as_bytes(),
-    );
+    output.copy_from_slice(blake3::hash(content).as_bytes());
 
     output
 }
@@ -88,16 +78,18 @@ impl Key {
     }
 
     pub(crate) fn root_object_id(&self) -> Result<ObjectId> {
-        derive_subkey(&self.master_key, b"_0s_root")
+        derive_subkey(&self.master_key, "zerostash.com 2022 root object id")
             .map(|k| ObjectId::from_bytes(k.expose_secret()))
     }
 
     pub(crate) fn get_meta_key(&self) -> Result<IndexKey> {
-        derive_subkey(&self.master_key, b"_0s_meta").map(ObjectOperations::new)
+        derive_subkey(&self.master_key, "zerostash.com 2022 metadata key")
+            .map(ObjectOperations::new)
     }
 
     pub(crate) fn get_object_key(&self) -> Result<ChunkKey> {
-        derive_subkey(&self.master_key, b"_0s_obj_").map(ObjectOperations::new)
+        derive_subkey(&self.master_key, "zerostash.com 2022 object base key")
+            .map(ObjectOperations::new)
     }
 }
 
@@ -226,7 +218,7 @@ fn get_chunk_nonce(object_id: &ObjectId, data_size: u32) -> aead::Nonce {
 }
 
 fn derive_argon2(salt_raw: &[u8], password: &[u8]) -> Result<RawKey> {
-    let salt = Blake2::new().hash_length(16).hash(salt_raw);
+    let salt = blake3::hash(salt_raw);
 
     let mut result = argon2::hash_raw(
         password,
@@ -245,18 +237,8 @@ fn derive_argon2(salt_raw: &[u8], password: &[u8]) -> Result<RawKey> {
     Ok(Secret::new(outbuf))
 }
 
-fn derive_subkey(key: &RawKey, ctx: &[u8]) -> Result<RawKey> {
-    assert!(ctx.len() < 16);
-
-    let mut outbuf = [0; CRYPTO_DIGEST_SIZE];
-    outbuf.copy_from_slice(
-        Blake2::new()
-            .hash_length(CRYPTO_DIGEST_SIZE)
-            .key(ctx)
-            .hash(key.expose_secret())
-            .as_bytes(),
-    );
-
+fn derive_subkey(key: &RawKey, ctx: &str) -> Result<RawKey> {
+    let outbuf = blake3::derive_key(ctx, key.expose_secret());
     Ok(Secret::new(outbuf))
 }
 

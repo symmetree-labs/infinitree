@@ -23,7 +23,7 @@ native-tls = ["rusoto_core/native-tls", "rusoto_s3/native-tls"]
 _test = ["s3", "native-tls"]
 
 [dependencies]
-blake2b_simd = "1"
+blake3 = "1"
 getrandom = "0.2"
 ring = "0.16"
 rust-argon2 = "0.8"
