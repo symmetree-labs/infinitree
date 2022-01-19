@@ -376,7 +376,7 @@ impl<T> AsRef<Object<T>> for Object<T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "_test"))]
 pub mod test {
     use crate::{ChunkPointer, Digest};
 
