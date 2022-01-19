@@ -499,4 +499,12 @@ impl<I: Index> Infinitree<I> {
     pub fn index(&self) -> impl Deref<Target = I> + '_ {
         self.index.read()
     }
+
+    /// Return the backend
+    ///
+    /// This allows synchronization of backends that queue upload
+    /// jobs, or other background tasks.
+    pub fn backend(&self) -> Arc<dyn Backend> {
+        self.backend.clone()
+    }
 }
