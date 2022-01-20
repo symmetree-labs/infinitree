@@ -47,10 +47,16 @@ pub enum ObjectError {
     },
     #[error("Chunk too large to be written: {size}, max: {max_size}")]
     ChunkTooLarge { max_size: usize, size: usize },
+    #[error("Fatal internal error")]
+    Fatal,
     #[error("Serialize failed")]
-    Serialize { source: Box<dyn std::error::Error> },
+    Serialize {
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("Deserialize failed")]
-    Deserialize { source: Box<dyn std::error::Error> },
+    Deserialize {
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, ObjectError>;
