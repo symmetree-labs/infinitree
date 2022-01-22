@@ -108,11 +108,16 @@ pub struct Directory {
 }
 
 impl Directory {
+    /// This is equivalent to `Directory::with_open_file_limit(target, 256)`
     pub fn new(target: impl AsRef<Path>) -> Result<Arc<Directory>> {
+        Self::with_open_file_limit(target, 256)
+    }
+
+    pub fn with_open_file_limit(target: impl AsRef<Path>, limit: usize) -> Result<Arc<Directory>> {
         std::fs::create_dir_all(&target)?;
         Ok(Arc::new(Directory {
             target: target.as_ref().into(),
-            read_lru: Arc::new(Mutex::new(LruCache::new(256))),
+            read_lru: Arc::new(Mutex::new(LruCache::new(limit))),
         }))
     }
 
