@@ -136,7 +136,7 @@ pub(crate) fn expand(
         }
 
 
-        impl #infinitree_crate::Index for #impl_generics #st_name #ty_generics #where_clause {
+        impl #impl_generics #infinitree_crate::Index for #st_name #ty_generics #where_clause {
             fn store_all(&'_ mut self) -> #infinitree_crate::anyhow::Result<Vec<#infinitree_crate::fields::Intent<Box<dyn #infinitree_crate::fields::Store>>>> {
                 Ok(vec![#strategies])
             }
