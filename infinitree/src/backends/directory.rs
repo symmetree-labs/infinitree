@@ -91,8 +91,8 @@ use mmap::get_buf;
 
 #[cfg(not(feature = "mmap"))]
 #[inline(always)]
-fn get_buf(filename: impl AsRef<Path>) -> Result<ReadBuffer> {
-    Ok(ReadBuffer::new(fs::read(&filename)?))
+fn get_buf(filename: impl AsRef<Path>) -> Result<Buffer> {
+    Ok(Object::new(ReadBuffer::new(fs::read(&filename)?)))
 }
 
 #[cfg(not(feature = "mmap"))]
