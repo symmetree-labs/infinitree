@@ -55,7 +55,7 @@ mod tests {
 
         let input = parse_quote! {
         #[derive(Default, Index)]
-        pub struct TestStruct {
+        pub struct TestStruct<T> {
             /// A field with both an accessor method and serialized to storage
             unattributed: ChunkIndex,
 
@@ -71,6 +71,9 @@ mod tests {
             /// Skip generating accessors and exclude from on-disk structure
             #[infinitree(strategy = "infinitree::fields::SparseField")]
             strategizing: ChunkIndex,
+
+            #[infinitree(skip)]
+            _ph: PhantomData<T>
         }
         };
 
@@ -79,7 +82,7 @@ mod tests {
         #[rustfmt::skip]
         let expected = quote! {
         #[automatically_derived]
-        impl TestStruct {
+        impl<T> TestStruct<T> {
             #[inline]
             pub fn unattributed(&'_ self) -> ::infinitree::fields::Intent<Box<::infinitree::fields::LocalField<ChunkIndex>>> {
                 use ::infinitree::fields::{Intent, strategy::Strategy};
@@ -117,7 +120,7 @@ mod tests {
 		]
             }
         }
-        impl ::infinitree::Index for TestStruct {
+        impl<T> ::infinitree::Index for TestStruct<T> {
             fn store_all(&'_ mut self) -> ::infinitree::anyhow::Result<Vec<::infinitree::fields::Intent<Box<dyn ::infinitree::fields::Store>>>> {
                 Ok(vec![
                     self.unattributed().into(),
