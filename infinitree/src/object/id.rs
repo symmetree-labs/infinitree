@@ -5,7 +5,7 @@ pub use hex::FromHexError;
 use std::{convert::TryFrom, string::ToString};
 
 /// Unique identifier for a persistence object.
-#[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObjectId(Digest);
 
 impl ObjectId {
@@ -48,5 +48,11 @@ impl ToString for ObjectId {
     #[inline(always)]
     fn to_string(&self) -> String {
         hex::encode(self.0.as_ref())
+    }
+}
+
+impl std::fmt::Debug for ObjectId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_string())
     }
 }

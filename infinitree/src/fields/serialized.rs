@@ -18,8 +18,14 @@ use std::{
 /// This implementation is super simplistic, and will not optimize for
 /// best performance. If you want something fancy, you are very likely
 /// to want to implement your own serialization.
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub struct Serialized<T>(Arc<RwLock<T>>);
+
+impl<T> Clone for Serialized<T> {
+    fn clone(&self) -> Self {
+        Serialized(self.0.clone())
+    }
+}
 
 impl<T> Serialized<T> {
     pub fn read(&self) -> impl Deref<Target = T> + '_ {

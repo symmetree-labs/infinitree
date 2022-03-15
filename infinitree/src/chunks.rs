@@ -1,7 +1,7 @@
 use crate::crypto::{Digest, Tag};
 use crate::object::ObjectId;
 
-#[derive(Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub(crate) struct RawChunkPointer {
     pub offs: u32,
     pub size: u32,
@@ -14,7 +14,7 @@ pub(crate) struct RawChunkPointer {
 ///
 /// A `ChunkPointer`, in addition to a [`Key`][crate::Key] is required
 /// to access most data that's outside the index system.
-#[derive(Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub struct ChunkPointer(RawChunkPointer);
 
 impl ChunkPointer {
