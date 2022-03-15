@@ -498,7 +498,7 @@ where
 
     #[inline(always)]
     fn insert(&mut self, record: Self::Item) {
-        debug_assert!(self.field.base.insert(record.0, record.1).is_ok());
+        assert!(self.field.base.insert(record.0, record.1).is_ok());
     }
 }
 
@@ -629,7 +629,37 @@ mod test {
     use crate::{
         fields::{LocalField, SparseField, Strategy},
         index::test::store_then_load,
+        Infinitree, Key,
     };
+
+    #[test]
+    fn bare_index_can_be_restored() {
+        let key = || Key::from_credentials("bare_index_map", "password").unwrap();
+        let storage = crate::backends::test::InMemoryBackend::shared();
+
+        {
+            let mut tree = Infinitree::<VersionedMap<usize, usize>>::empty(storage.clone(), key());
+            tree.index().insert(1000, 1000);
+            tree.commit(None);
+            tree.index().clear();
+
+            for i in 0..100 {
+                tree.index().insert(i, i + 1);
+            }
+
+            tree.commit(None);
+        }
+
+        let mut tree =
+            Infinitree::<VersionedMap<usize, usize>>::open(storage.clone(), key()).unwrap();
+        tree.load_all();
+
+        for i in 0..100 {
+            assert_eq!(i + 1, *tree.index().get(&i).unwrap());
+        }
+
+        assert_eq!(tree.index().len(), 101);
+    }
 
     #[test]
     fn duplicate_insert_is_noop() {
