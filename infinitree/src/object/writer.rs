@@ -5,7 +5,6 @@ use crate::{
     crypto::{ChunkKey, CryptoProvider, Digest},
     ChunkPointer,
 };
-
 use std::sync::Arc;
 
 pub trait Writer: Send {
@@ -55,29 +54,34 @@ impl Drop for AEADWriter {
 
 impl Writer for AEADWriter {
     fn write_chunk(&mut self, hash: &Digest, data: &[u8]) -> Result<ChunkPointer> {
-        let size = compress::get_maximum_output_size(data.len());
-        if size >= self.object.capacity() {
-            return Err(ObjectError::ChunkTooLarge {
-                size,
-                max_size: self.object.capacity(),
-            });
-        }
+        let size = {
+            let buffer = self.object.tail_mut();
 
-        let mut offs = self.object.position();
-        if offs + size > self.object.capacity() {
-            self.flush()?;
-            offs = self.object.position();
-        }
+            match compress::compress_into(data, buffer) {
+                Ok(size) => size,
+                Err(_e) => {
+                    self.flush()?;
+
+                    let buffer = self.object.tail_mut();
+                    compress::compress_into(data, buffer).map_err(|_| {
+                        ObjectError::ChunkTooLarge {
+                            size: data.len(),
+                            max_size: ((self.object.capacity() - 16 - 4) as f64 / 1.1) as usize,
+                        }
+                    })?
+                }
+            }
+        };
 
         let oid = *self.object.id();
         let (size, tag) = {
             let buffer = self.object.tail_mut();
-            let size = compress::compress_into(data, buffer)?;
             let tag = self.crypto.encrypt_chunk(&oid, hash, &mut buffer[..size]);
 
             (size, tag)
         };
 
+        let offs = self.object.position();
         *self.object.position_mut() += size;
 
         Ok(ChunkPointer::new(offs as u32, size as u32, oid, *hash, tag))
