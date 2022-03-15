@@ -16,7 +16,7 @@ type TaskHandle = JoinHandle<anyhow::Result<PutObjectOutput>>;
 pub struct InMemoryS3 {
     client: S3Client,
     bucket: String,
-    in_flight: Arc<HashMap<ObjectId, Option<TaskHandle>>>,
+    in_flight: Arc<HashMap<ObjectId, Arc<Option<TaskHandle>>>>,
 }
 
 impl InMemoryS3 {
@@ -26,7 +26,7 @@ impl InMemoryS3 {
         Ok(Self {
             client,
             bucket,
-            in_flight: Arc::default(),
+            in_flight: Arc::new(HashMap::default()),
         })
     }
 }
@@ -41,24 +41,31 @@ impl Backend for InMemoryS3 {
         let key = object.id().to_string();
         let id = *object.id();
 
-        self.in_flight
-            .insert(
-                id,
-                Some(task::spawn(async move {
-                    let handle = client
-                        .put_object(PutObjectRequest {
-                            bucket,
-                            key,
-                            body,
-                            ..Default::default()
-                        })
-                        .await
-                        .context("Failed to write object");
-                    in_flight.remove(&id);
-                    handle
-                })),
-            )
-            .map_err(|_| BackendError::Create)?;
+        let handle = Arc::new(Some(task::spawn(async move {
+            let handle = client
+                .put_object(PutObjectRequest {
+                    bucket,
+                    key,
+                    body,
+                    ..Default::default()
+                })
+                .await
+                .context("Failed to write object");
+            in_flight.remove(&id);
+            handle
+        })));
+
+        self.in_flight.upsert(
+            id,
+            || handle.clone(),
+            |_, v| {
+                if let Some(handle) = v.as_ref() {
+                    handle.abort();
+                }
+
+                *v = handle.clone();
+            },
+        );
 
         Ok(())
     }
@@ -98,9 +105,9 @@ impl Backend for InMemoryS3 {
     }
 
     fn sync(&self) -> Result<()> {
-        let mut handles = vec![];
+        let handles = futures::stream::FuturesUnordered::new();
         self.in_flight.for_each(|_, v| {
-            if let Some(handle) = std::mem::take(v) {
+            if let Some(handle) = std::mem::take(Arc::get_mut(v).unwrap()) {
                 handles.push(handle);
             }
         });
