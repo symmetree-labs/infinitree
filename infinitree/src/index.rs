@@ -73,9 +73,9 @@ pub(crate) use reader::Reader;
 pub(crate) use writer::Writer;
 
 /// A representation of a generation within the tree
-pub(crate) type Generation = Digest;
+pub type CommitId = Digest;
 
-pub(crate) type TransactionPointer = (Generation, Field, ObjectId);
+pub(crate) type TransactionPointer = (CommitId, Field, ObjectId);
 
 /// A list of transactions, represented in order, for versions and fields
 pub(crate) type TransactionList = Vec<TransactionPointer>;
@@ -162,7 +162,7 @@ pub(crate) trait IndexExt: Index {
         index: &mut Writer,
         object: &mut dyn crate::object::Writer,
         mut hashed_data: Vec<u8>,
-    ) -> anyhow::Result<(Generation, Vec<(Field, ObjectId)>)> {
+    ) -> anyhow::Result<(CommitId, Vec<(Field, ObjectId)>)> {
         let log = self
             .store_all()?
             .drain(..)

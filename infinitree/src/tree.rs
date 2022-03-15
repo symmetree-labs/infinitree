@@ -1,3 +1,4 @@
+//! Main tree and commit management
 #![deny(missing_docs)]
 
 use crate::{
@@ -5,74 +6,81 @@ use crate::{
         self, depth::Depth, Collection, Intent, Load, Query, QueryAction, QueryIteratorOwned,
         Serialized, Store,
     },
-    index::{self, Generation, Index, IndexExt, TransactionList},
+    index::{self, CommitId, Index, IndexExt, TransactionList},
     object::{AEADReader, AEADWriter},
     Backend, Key, ObjectId,
 };
 use anyhow::Result;
 use parking_lot::RwLock;
+use serde::{de::DeserializeOwned, Serialize};
 use serde_with::serde_as;
 use std::{ops::Deref, sync::Arc, time::SystemTime};
 
-/// This is primarily a serialization helper, so we can hash all of
-/// this metadata consistently with [`CommitMetadata`]
+/// Identifies a cryptographically secured set of transactions on the tree.
 #[serde_as]
-#[derive(Serialize, Debug, Clone)]
-struct PreCommitMetadata {
-    previous: Option<Generation>,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Commit<CustomData>
+where
+    CustomData: Serialize,
+{
+    id: CommitId,
+    metadata: CommitMetadata<CustomData>,
+}
+
+/// All the protected parts of a [`Commit`]
+#[serde_as]
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CommitMetadata<CustomData>
+where
+    CustomData: Serialize,
+{
+    previous: Option<CommitId>,
     message: Option<String>,
     #[serde_as(as = "serde_with::TimestampSecondsWithFrac<f64>")]
     time: SystemTime,
+
+    custom_data: CustomData,
 }
 
-impl PreCommitMetadata {
-    fn finalize(self, digest: Generation) -> CommitMetadata {
-        CommitMetadata {
-            digest,
-            previous: self.previous,
-            message: self.message,
-            time: self.time,
+impl<CustomData: Serialize + Default> Default for CommitMetadata<CustomData> {
+    fn default() -> Self {
+        Self {
+            time: SystemTime::now(),
+            previous: None,
+            message: None,
+            custom_data: CustomData::default(),
         }
     }
 }
 
-/// All fields of this struct are hashed into `digest` to make a
-/// [`Generation`]
-#[serde_as]
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct CommitMetadata {
-    digest: Generation,
-    previous: Option<Generation>,
-    message: Option<String>,
-    #[serde_as(as = "serde_with::TimestampSecondsWithFrac<f64>")]
-    time: SystemTime,
-}
-
 /// Enum to navigate the versions that are available in an Infinitree
 #[allow(unused)]
-pub enum GenerationSet {
+pub enum CommitFilter {
     /// On querying, all versions will be crawled. This is the
     /// default.
     All,
     /// Only a single generation will be looked at during querying.
-    Single(Generation),
+    Single(CommitId),
     /// All generations up to and including the given one will be queried.
-    UpTo(Generation),
+    UpTo(CommitId),
     /// Only use generations between the two given versions.
     /// The first parameter **must** be earlier generation than the
     /// second.
-    Range(Generation, Generation),
+    Range(CommitId, CommitId),
 }
 
-impl Default for GenerationSet {
+impl Default for CommitFilter {
     fn default() -> Self {
         Self::All
     }
 }
 
 /// The root index of the tree that stores version information
-#[derive(Default, infinitree_macros::Index)]
-struct RootIndex {
+#[derive(infinitree_macros::Index)]
+struct RootIndex<CustomData>
+where
+    CustomData: Serialize + DeserializeOwned + Send + Sync + 'static,
+{
     /// Transaction log of individual fields included in each
     /// generation.
     ///
@@ -82,15 +90,30 @@ struct RootIndex {
     transaction_log: Serialized<TransactionList>,
 
     /// Chronologically ordered list of commits
-    commit_metadata: Serialized<Vec<CommitMetadata>>,
+    commit_list: Serialized<Vec<Commit<CustomData>>>,
 }
 
-impl RootIndex {
-    fn version_after(&self, gen: &Generation) -> Option<Generation> {
-        let handle = self.commit_metadata.read();
+impl<CustomData> Default for RootIndex<CustomData>
+where
+    CustomData: Serialize + DeserializeOwned + Send + Sync + 'static,
+{
+    fn default() -> Self {
+        Self {
+            transaction_log: Serialized::default(),
+            commit_list: Serialized::default(),
+        }
+    }
+}
+
+impl<CustomData> RootIndex<CustomData>
+where
+    CustomData: Serialize + DeserializeOwned + Send + Sync,
+{
+    fn version_after(&self, gen: &CommitId) -> Option<CommitId> {
+        let handle = self.commit_list.read();
 
         // walking in reverse may hit faster
-        let mut iter = handle.iter().rev().map(|c| c.digest).peekable();
+        let mut iter = handle.iter().rev().map(|c| c.id).peekable();
         while let Some(i) = iter.next() {
             if Some(gen) == iter.peek() {
                 return Some(i);
@@ -105,9 +128,12 @@ impl RootIndex {
 ///
 /// This is primarily a wrapper around an [`Index`] that manages
 /// versioning and key management.
-pub struct Infinitree<I> {
+pub struct Infinitree<I, CustomData = ()>
+where
+    CustomData: Serialize + DeserializeOwned + Send + Sync + 'static,
+{
     /// All versioning-related stuff is in the `RootIndex`.
-    root: RootIndex,
+    root: RootIndex<CustomData>,
 
     /// The Index we're currently working with.
     /// The RwLock helps lock the entire Index during a commit
@@ -120,10 +146,22 @@ pub struct Infinitree<I> {
     master_key: Key,
 
     /// These are the generations we're currently working on.
-    selected_gens: GenerationSet,
+    commit_filter: CommitFilter,
 }
 
-impl<I: Index + Default> Infinitree<I> {
+impl<I, CustomData> Drop for Infinitree<I, CustomData>
+where
+    CustomData: Serialize + DeserializeOwned + Send + Sync + 'static,
+{
+    fn drop(&mut self) {
+        self.backend.sync().unwrap();
+    }
+}
+
+impl<I: Index + Default, CustomData> Infinitree<I, CustomData>
+where
+    CustomData: Serialize + DeserializeOwned + Send + Sync,
+{
     /// Initialize an empty index and tree with no version history.
     ///
     /// # Examples
@@ -160,13 +198,13 @@ impl<I: Index + Default> Infinitree<I> {
             backend,
             master_key,
             index: I::default().into(),
-            selected_gens: GenerationSet::default(),
+            commit_filter: CommitFilter::default(),
         })
     }
 }
 
-fn open_root(
-    root: &mut RootIndex,
+fn open_root<CustomData: Serialize + DeserializeOwned + Send + Sync>(
+    root: &mut RootIndex<CustomData>,
     backend: Arc<dyn Backend>,
     master_key: &Key,
     root_object: ObjectId,
@@ -187,8 +225,15 @@ fn open_root(
     Ok(())
 }
 
+/// A commit message. Mostly equivalent to Option<String>.
+///
+/// The main reason for a separate wrapper type is being able to use
+/// versatile `From<T>` implementations that in return make the
+/// `Infinitree` API nicer to use.
 pub enum Message {
+    /// No commit message.
     Empty,
+    /// Use the `String` parameter as commit message
     Some(String),
 }
 
@@ -222,34 +267,10 @@ impl From<Message> for Option<String> {
     }
 }
 
-impl<I: Index> Infinitree<I> {
-    /// Wraps the given `index` in an Infinitree.
-    ///
-    /// This is primarily useful if you're done writing an `Index`,
-    /// and want to commit and persist it, or if you need extra
-    /// initialization because `Default` is not viable.
-    pub fn with_key(backend: Arc<dyn Backend>, index: I, master_key: Key) -> Self {
-        Self {
-            backend,
-            master_key,
-            index: index.into(),
-            root: RootIndex::default(),
-            selected_gens: GenerationSet::default(),
-        }
-    }
-
-    /// Only run persistence query operations
-    /// ([`query`][Infinitree::query], [`load`][Infinitree::load],
-    /// [`iter`][Infinitree::iter]) on the selected generations.
-    pub fn select(&mut self, version: GenerationSet) {
-        self.selected_gens = version;
-    }
-
-    /// Return all generations in the tree.
-    pub fn generations(&self) -> Vec<CommitMetadata> {
-        self.root.commit_metadata.read().clone()
-    }
-
+impl<I: Index, CustomData> Infinitree<I, CustomData>
+where
+    CustomData: Serialize + DeserializeOwned + Send + Sync + Default,
+{
     /// Commit changes currently in the index.
     ///
     /// This persists currently in-memory data, and also records the
@@ -278,27 +299,83 @@ impl<I: Index> Infinitree<I> {
     /// tree.commit(message);
     /// ```
     pub fn commit(&mut self, message: impl Into<Message>) -> Result<()> {
+        let metadata = CommitMetadata {
+            time: SystemTime::now(),
+            message: message.into().into(),
+            previous: self.root.commit_list.read().last().map(|c| c.id),
+            ..Default::default()
+        };
+
+        self.commit_with_metadata(metadata)
+    }
+}
+
+impl<I: Index, CustomData> Infinitree<I, CustomData>
+where
+    CustomData: Serialize + DeserializeOwned + Send + Sync,
+{
+    /// Wraps the given `index` in an Infinitree.
+    ///
+    /// This is primarily useful if you're done writing an `Index`,
+    /// and want to commit and persist it, or if you need extra
+    /// initialization because `Default` is not viable.
+    pub fn with_key(backend: Arc<dyn Backend>, index: I, master_key: Key) -> Self {
+        Self {
+            backend,
+            master_key,
+            index: index.into(),
+            root: RootIndex::default(),
+            commit_filter: CommitFilter::default(),
+        }
+    }
+
+    /// Return all generations in the tree.
+    pub fn commit_list(&self) -> impl Deref<Target = Vec<Commit<CustomData>>> + '_ {
+        self.root.commit_list.read()
+    }
+
+    /// Only run persistence query operations
+    /// ([`query`][Infinitree::query], [`load`][Infinitree::load],
+    /// [`iter`][Infinitree::iter]) on the selected generations.
+    pub fn filter_commits(&mut self, version: CommitFilter) {
+        self.commit_filter = version;
+    }
+
+    /// Commit changes currently in the index.
+    ///
+    /// For full documentation, please read [`Infinitree::commit`].
+    pub fn commit_with_custom_data(
+        &mut self,
+        message: impl Into<Message>,
+        custom_data: CustomData,
+    ) -> Result<()> {
+        let metadata = CommitMetadata {
+            time: SystemTime::now(),
+            message: message.into().into(),
+            previous: self.root.commit_list.read().last().map(|c| c.id),
+            custom_data,
+        };
+
+        self.commit_with_metadata(metadata)
+    }
+
+    /// Commit using manually prepared metadata
+    ///
+    /// For full documentation, please read [`Infinitree::commit`].
+    pub fn commit_with_metadata(&mut self, metadata: CommitMetadata<CustomData>) -> Result<()> {
         let key = self.master_key.get_meta_key()?;
         let start_meta = ObjectId::new(&key);
 
         let mut index = index::Writer::new(start_meta, self.backend.clone(), key.clone())?;
         let mut object = self.object_writer()?;
 
-        let precommit = PreCommitMetadata {
-            time: SystemTime::now(),
-            message: message.into().into(),
-            previous: self.root.commit_metadata.read().last().map(|c| c.digest),
-        };
-        let (digest, changeset) = self.index.write().commit(
+        let (id, changeset) = self.index.write().commit(
             &mut index,
             &mut object,
-            crate::serialize_to_vec(&precommit)?,
+            crate::serialize_to_vec(&metadata)?,
         )?;
 
-        self.root
-            .commit_metadata
-            .write()
-            .push(precommit.finalize(digest));
+        self.root.commit_list.write().push(Commit { id, metadata });
 
         // scope for rewriting history. this is critical, the log is locked.
         {
@@ -306,11 +383,7 @@ impl<I: Index> Infinitree<I> {
             let size = tr_log.len() + changeset.len();
             let history = std::mem::replace(&mut *tr_log, Vec::with_capacity(size));
 
-            tr_log.extend(
-                changeset
-                    .into_iter()
-                    .map(|(field, oid)| (digest, field, oid)),
-            );
+            tr_log.extend(changeset.into_iter().map(|(field, oid)| (id, field, oid)));
             tr_log.extend(history);
         }
 
@@ -417,21 +490,21 @@ impl<I: Index> Infinitree<I> {
             .transaction_log
             .read()
             .iter()
-            .skip_while(|(gen, _, _)| match &self.selected_gens {
-                GenerationSet::All => false,
-                GenerationSet::Single(target) => gen != target,
-                GenerationSet::UpTo(_target) => false,
-                GenerationSet::Range(start, _end) => gen != start,
+            .skip_while(|(gen, _, _)| match &self.commit_filter {
+                CommitFilter::All => false,
+                CommitFilter::Single(target) => gen != target,
+                CommitFilter::UpTo(_target) => false,
+                CommitFilter::Range(start, _end) => gen != start,
             })
-            .take_while(|(gen, _, _)| match &self.selected_gens {
-                GenerationSet::All => true,
-                GenerationSet::Single(target) => gen == target,
-                GenerationSet::UpTo(target) => self
+            .take_while(|(gen, _, _)| match &self.commit_filter {
+                CommitFilter::All => true,
+                CommitFilter::Single(target) => gen == target,
+                CommitFilter::UpTo(target) => self
                     .root
                     .version_after(target)
                     .map(|ref v| v != gen)
                     .unwrap_or(true),
-                GenerationSet::Range(_start, end) => self
+                CommitFilter::Range(_start, end) => self
                     .root
                     .version_after(end)
                     .map(|ref v| v != gen)
