@@ -33,6 +33,12 @@ impl AEADReader {
     }
 }
 
+impl AsMut<Self> for AEADReader {
+    fn as_mut(&mut self) -> &mut Self {
+        self
+    }
+}
+
 impl Reader for AEADReader {
     fn read_chunk<'target>(
         &mut self,

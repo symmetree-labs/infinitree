@@ -16,6 +16,9 @@ pub use reader::{AEADReader, Reader};
 mod writer;
 pub use writer::{AEADWriter, Writer};
 
+mod bufferedstream;
+pub use bufferedstream::{BufferedSink, BufferedStream, StreamChunks};
+
 pub mod serializer;
 
 mod id;
@@ -47,6 +50,8 @@ pub enum ObjectError {
     },
     #[error("Chunk too large to be written: {size}, max: {max_size}")]
     ChunkTooLarge { max_size: usize, size: usize },
+    #[error("Buffer is smaller than required size: {min_size}")]
+    BufferTooSmall { min_size: usize },
     #[error("Fatal internal error")]
     Fatal,
     #[error("Serialize failed")]
