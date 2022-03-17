@@ -14,6 +14,13 @@ pub(crate) struct RawChunkPointer {
 ///
 /// A `ChunkPointer`, in addition to a [`Key`][crate::Key] is required
 /// to access most data that's outside the index system.
+///
+/// # Examples
+/// ```
+/// use infinitree::ChunkPointer;
+///
+/// assert_eq!(std::mem::size_of::<ChunkPointer>(), 88);
+/// ```
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub struct ChunkPointer(RawChunkPointer);
 
