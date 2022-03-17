@@ -182,7 +182,7 @@ mod crypto;
 pub mod fields;
 pub mod index;
 pub mod object;
-mod tree;
+pub mod tree;
 
 pub use backends::Backend;
 pub use chunks::ChunkPointer;

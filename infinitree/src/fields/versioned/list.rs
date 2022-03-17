@@ -41,7 +41,7 @@ impl<T: 'static> Node<T> {
 
     fn next(&self) -> Option<SCCArc<Node<T>>> {
         let barrier = Barrier::new();
-        self.0.load(Ordering::Acquire, &barrier).try_into_arc()
+        self.0.load(Ordering::Acquire, &barrier).get_arc()
     }
 }
 
@@ -262,11 +262,7 @@ impl<T: 'static> LinkedList<T> {
     /// ```
     pub fn commit(&self) {
         let barrier = Barrier::new();
-        let last = self
-            .inner
-            .last
-            .load(Ordering::SeqCst, &barrier)
-            .try_into_arc();
+        let last = self.inner.last.load(Ordering::SeqCst, &barrier).get_arc();
         self.inner
             .commit_start
             .swap((None, Tag::None), Ordering::SeqCst);
@@ -336,7 +332,7 @@ impl<T: 'static> LinkedList<T> {
             .inner
             .previous_commit_last
             .load(Ordering::SeqCst, &barrier)
-            .try_into_arc();
+            .get_arc();
         self.inner.last.swap((last, Tag::None), Ordering::SeqCst);
         self.inner
             .commit_start
@@ -347,11 +343,7 @@ impl<T: 'static> LinkedList<T> {
         let barrier = Barrier::new();
         NodeIter {
             first: true,
-            current: self
-                .inner
-                .first
-                .load(Ordering::Acquire, &barrier)
-                .try_into_arc(),
+            current: self.inner.first.load(Ordering::Acquire, &barrier).get_arc(),
         }
     }
 }
