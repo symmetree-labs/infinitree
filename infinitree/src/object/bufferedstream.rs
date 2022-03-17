@@ -29,6 +29,9 @@ impl StreamChunks {
     }
 }
 
+/// Reader for an infinite stream spanning arbitrary number of objects.
+///
+/// For more details about internals, look at [`BufferedSink`].
 pub struct BufferedStream<Reader = super::AEADReader, Buffer = BlockBuffer> {
     reader: Reader,
     buffer: Buffer,
