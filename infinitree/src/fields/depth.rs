@@ -39,7 +39,9 @@ fn full_history<'r>(
 ) -> impl Iterator<Item = reader::Transaction> + 'r {
     transactions
         .into_iter()
-        .map(move |(_gen, field, objectid)| index.as_ref().transaction(field, &objectid).unwrap())
+        .filter_map(move |(_gen, field, objectid)| {
+            index.as_ref().transaction(field, &objectid).ok()
+        })
 }
 
 impl Depth for Incremental {
