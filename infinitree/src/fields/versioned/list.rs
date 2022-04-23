@@ -4,7 +4,7 @@ use crate::{
         depth::Incremental, Collection, Intent, Load, LocalField, SparseField, Store, Strategy,
         Value,
     },
-    index::{writer, FieldWriter},
+    index::{FieldWriter, Transaction},
     object::{self, serializer::SizedPointer, ObjectError},
 };
 use scc::{
@@ -352,11 +352,7 @@ impl<T> Store for LocalField<LinkedList<T>>
 where
     T: Value,
 {
-    fn store(
-        &mut self,
-        transaction: &mut writer::Transaction<'_>,
-        _object: &mut dyn object::Writer,
-    ) {
+    fn store(&mut self, mut transaction: &mut dyn Transaction, _object: &mut dyn object::Writer) {
         for v in self.field.iter() {
             transaction.write_next(v);
         }
@@ -391,11 +387,7 @@ impl<T> Store for SparseField<LinkedList<T>>
 where
     T: Value,
 {
-    fn store(
-        &mut self,
-        transaction: &mut writer::Transaction<'_>,
-        writer: &mut dyn object::Writer,
-    ) {
+    fn store(&mut self, mut transaction: &mut dyn Transaction, writer: &mut dyn object::Writer) {
         for v in self.field.iter() {
             let ptr = object::serializer::write(
                 writer,

@@ -14,7 +14,8 @@ fn empty_commit(c: &mut Criterion) {
         let mut tree = Infinitree::<Measurements>::empty(
             InMemoryBackend::shared(),
             Key::from_credentials("username", "password").unwrap(),
-        );
+        )
+        .unwrap();
 
         b.iter(|| {
             tree.commit("empty commit yay").unwrap();
@@ -29,7 +30,8 @@ fn empty_open(c: &mut Criterion) {
             let mut tree = Infinitree::<Measurements>::empty(
                 b.clone(),
                 Key::from_credentials("username", "password").unwrap(),
-            );
+            )
+            .unwrap();
             tree.commit("empty commit yay").unwrap();
 
             b
@@ -50,7 +52,8 @@ fn load_1_value(c: &mut Criterion) {
         let mut tree = Infinitree::<Measurements>::empty(
             InMemoryBackend::shared(),
             Key::from_credentials("username", "password").unwrap(),
-        );
+        )
+        .unwrap();
         tree.commit("empty commit yay").unwrap();
 
         b.iter(|| tree.load_all().unwrap());

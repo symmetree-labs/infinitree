@@ -31,8 +31,8 @@
 //! in the [`index`](super) module.
 
 use crate::{
-    index::{reader, writer, FieldReader, TransactionList},
-    object,
+    index::{FieldReader, TransactionList},
+    object::{self, AEADReader, Pool},
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{cmp::Eq, hash::Hash, sync::Arc};
@@ -115,16 +115,6 @@ pub trait Collection {
     /// full record that can be inserted into the in-memory store.
     type Item;
 
-    /// This function is called when initializing an iterator. It will
-    /// typically read one-off book keeping information from the
-    /// header of the field transaction.
-    fn load_head(
-        &mut self,
-        _transaction: &mut reader::Transaction,
-        _object: &mut dyn object::Reader,
-    ) {
-    }
-
     /// Get the key based on the deserialized data. You want this to
     /// be a reference that's easy to derive from the serialized data.
     fn key(from: &Self::Serialized) -> &Self::Key;
@@ -144,14 +134,14 @@ where
 
     fn select(
         &mut self,
-        index: &reader::Reader,
-        object: &mut dyn object::Reader,
+        pool: Pool<AEADReader>,
         transaction_list: TransactionList,
         predicate: impl Fn(&Self::Key) -> QueryAction,
     ) {
         let predicate = Arc::new(predicate);
-        for transaction in T::Depth::resolve(index, transaction_list) {
-            let iter = QueryIterator::new(transaction, object, predicate.clone(), self);
+        let mut reader = pool.lease().unwrap();
+        for transaction in T::Depth::resolve(pool, transaction_list) {
+            let iter = QueryIterator::new(transaction, &mut reader, predicate.clone(), self);
             for item in iter {
                 self.insert(item);
             }

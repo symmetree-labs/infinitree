@@ -1,14 +1,16 @@
-use super::{Result, Writer};
-use crate::{crypto::Digest, ChunkPointer};
+use crate::{
+    crypto::Digest,
+    object::{Result, Writer},
+    ChunkPointer,
+};
 
 pub type WriterPool<W> = super::Pool<W>;
 
 impl<W: 'static + Writer> Writer for WriterPool<W> {
     fn write_chunk(&mut self, hash: &Digest, data: &[u8]) -> Result<ChunkPointer> {
         let mut writer = self.lease()?;
-        let result = writer.write_chunk(hash, data);
 
-        result
+        writer.write_chunk(hash, data)
     }
 
     fn flush(&mut self) -> Result<()> {

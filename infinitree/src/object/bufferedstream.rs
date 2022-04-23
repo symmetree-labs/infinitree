@@ -1,5 +1,5 @@
-use super::{Reader, Writer};
-use crate::{chunks::ChunkPointer, object::BlockBuffer};
+use super::{AEADReader, BlockBuffer, PoolRef, Reader, Writer};
+use crate::chunks::ChunkPointer;
 use std::io::{self, Read, Write};
 
 /// Smaller chunks will lower the storage overhead, achieving lowerhead.
@@ -7,34 +7,57 @@ use std::io::{self, Read, Write};
 const CHUNK_SIZE: usize = 500 * 1024;
 
 /// A descriptor that contains necessary data to deserialize a stream.
-#[derive(Serialize, Deserialize, Default, Debug)]
-pub struct StreamChunks(Vec<ChunkPointer>);
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct Stream(Vec<ChunkPointer>);
+pub type DeserializeStream =
+    crate::Deserializer<rmp_serde::decode::ReadReader<BufferedStream<PoolRef<AEADReader>>>>;
 
-impl StreamChunks {
+impl Stream {
     /// Open a reader that implements [`std::io::Read`].
     ///
     /// Note that you can't [`std::io::Seek`] in this stream at this
     /// point efficiently. If that is your use case, I recommend
     /// implementing another layer of indirection, and storing
-    /// `StreamChunks` e.g. in a [`VersionedMap<K,
-    /// StreamChunks>`][crate::fields::VersionedMap]
+    /// `Stream` e.g. in a [`VersionedMap<K,
+    /// Stream>`][crate::fields::VersionedMap]
     pub fn open_reader<R: Reader, M: AsMut<R>>(&self, reader: M) -> BufferedStream<M> {
+        self.open_with_buffer(reader, BlockBuffer::default())
+    }
+
+    /// Open a reader that implements [`std::io::Read`] with buffer.
+    ///
+    /// See [`Stream::open_reader`] for details
+    pub fn open_with_buffer<R: Reader, M: AsMut<R>>(
+        &self,
+        reader: M,
+        buffer: BlockBuffer,
+    ) -> BufferedStream<M> {
         BufferedStream {
             reader,
             chunks: self.0.iter().rev().cloned().collect(),
             pos: None,
             len: None,
-            buffer: BlockBuffer::default(),
+            buffer,
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<ChunkPointer>> for Stream {
+    fn from(ptrs: Vec<ChunkPointer>) -> Self {
+        Self(ptrs)
     }
 }
 
 /// Reader for an infinite stream spanning arbitrary number of objects.
 ///
 /// For more details about internals, look at [`BufferedSink`].
-pub struct BufferedStream<Reader = super::AEADReader, Buffer = BlockBuffer> {
+pub struct BufferedStream<Reader = AEADReader> {
     reader: Reader,
-    buffer: Buffer,
+    buffer: BlockBuffer,
     chunks: Vec<ChunkPointer>,
     pos: Option<usize>,
     len: Option<usize>,
@@ -65,8 +88,7 @@ impl<R: Reader> Read for BufferedStream<R> {
             match (self.pos, self.len) {
                 (Some(pos), Some(len)) if pos != len => {
                     let size = (buf.len() - written).min(len - pos);
-                    buf[written..written + size]
-                        .copy_from_slice(&self.buffer.as_ref()[pos..pos + size]);
+                    buf[written..written + size].copy_from_slice(&self.buffer[pos..pos + size]);
 
                     self.pos = Some(pos + size);
                     written += size;
@@ -102,12 +124,12 @@ impl<R: Reader> Read for BufferedStream<R> {
 ///
 /// ```
 /// use std::io::Write;
-/// use infinitree::{Infinitree, Key, fields::Serialized, backends::test::InMemoryBackend, object::{BufferedSink, StreamChunks}};
+/// use infinitree::{Infinitree, Key, fields::Serialized, backends::test::InMemoryBackend, object::{BufferedSink, Stream}};
 ///
-/// let mut tree = Infinitree::<infinitree::fields::VersionedMap<String, StreamChunks>>::empty(
+/// let mut tree = Infinitree::<infinitree::fields::VersionedMap<String, Stream>>::empty(
 ///     InMemoryBackend::shared(),
 ///     Key::from_credentials("username", "password").unwrap()
-/// );
+/// ).unwrap();
 ///
 /// let mut sink = BufferedSink::new(tree.object_writer().unwrap());
 ///
@@ -169,14 +191,14 @@ where
     /// and avoids fragmenting data written to storage.
     ///
     /// Returns the stream's descriptor which can be freely serialized or used in an index.
-    pub fn clear(&mut self) -> super::Result<StreamChunks> {
+    pub fn clear(&mut self) -> super::Result<Stream> {
         self.empty_buffer()?;
 
         self.pos = 0;
         self.len = 0;
         self.buffer.as_mut().fill(0);
 
-        let chunks = StreamChunks(self.chunks.clone());
+        let chunks = Stream(self.chunks.clone());
         self.chunks.clear();
         Ok(chunks)
     }
@@ -184,10 +206,10 @@ where
     /// Finish using the `BufferedSink` instance, flush and close the underlying Writer.
     ///
     /// Returns the stream's descriptor which can be freely serialized or used in an index.
-    pub fn finish(mut self) -> super::Result<StreamChunks> {
+    pub fn finish(mut self) -> super::Result<Stream> {
         self.empty_buffer()?;
         self.flush()?;
-        Ok(StreamChunks(self.chunks))
+        Ok(Stream(self.chunks))
     }
 
     fn empty_buffer(&mut self) -> super::Result<()> {

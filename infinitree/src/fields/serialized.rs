@@ -3,8 +3,8 @@ use super::{
     Load, LocalField, Store,
 };
 use crate::{
-    index::{reader, writer, FieldReader, FieldWriter},
-    object,
+    index::{FieldReader, FieldWriter, Transaction},
+    object::{self, AEADReader, Pool},
 };
 use parking_lot::RwLock;
 use serde::{de::DeserializeOwned, Serialize};
@@ -51,11 +51,7 @@ where
     T: Serialize + Sync,
 {
     #[inline(always)]
-    fn store(
-        &mut self,
-        transaction: &mut writer::Transaction<'_>,
-        _object: &mut dyn object::Writer,
-    ) {
+    fn store(&mut self, mut transaction: &mut dyn Transaction, _object: &mut dyn object::Writer) {
         transaction.write_next(&*self.field.read());
     }
 }
@@ -64,13 +60,8 @@ impl<T> Load for LocalField<Serialized<T>>
 where
     T: DeserializeOwned,
 {
-    fn load(
-        &mut self,
-        index: &reader::Reader,
-        _object: &mut dyn object::Reader,
-        transaction_list: crate::index::TransactionList,
-    ) {
-        for mut transaction in Snapshot::resolve(index, transaction_list) {
+    fn load(&mut self, pool: Pool<AEADReader>, transaction_list: crate::index::TransactionList) {
+        for mut transaction in Snapshot::resolve(pool, transaction_list) {
             *self.field.write() = transaction.read_next().unwrap();
         }
     }

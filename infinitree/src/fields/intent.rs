@@ -2,8 +2,8 @@
 
 use super::query::QueryAction;
 use crate::{
-    index::{reader, writer, TransactionList},
-    object,
+    index::{Transaction, TransactionList},
+    object::{self, AEADReader, Pool},
 };
 
 /// A wrapper to allow working with trait objects and `impl Trait`
@@ -66,7 +66,7 @@ pub trait Store {
     ///
     /// Typically, the [`ChunkPointer`][crate::ChunkPointer] values returned by `object`
     /// should be stored in the index.
-    fn store(&mut self, transaction: &mut writer::Transaction<'_>, object: &mut dyn object::Writer);
+    fn store(&mut self, transaction: &mut dyn Transaction, object: &mut dyn object::Writer);
 }
 
 /// Load all data from the index field into memory.
@@ -90,12 +90,7 @@ pub trait Load {
     /// with a collection, and therefore it is recommended that
     /// `transaction_list` is prepared and sanitized for the field
     /// that's being restored.
-    fn load(
-        &mut self,
-        index: &reader::Reader,
-        object: &mut dyn object::Reader,
-        transaction_list: TransactionList,
-    );
+    fn load(&mut self, pool: Pool<AEADReader>, transaction_list: TransactionList);
 }
 
 impl<K, T> Load for T
@@ -103,15 +98,8 @@ where
     T: Query<Key = K>,
 {
     #[inline(always)]
-    fn load(
-        &mut self,
-        reader: &reader::Reader,
-        object: &mut dyn object::Reader,
-        transaction_list: TransactionList,
-    ) {
-        Query::select(self, reader, object, transaction_list, |_| {
-            QueryAction::Take
-        })
+    fn load(&mut self, pool: Pool<AEADReader>, transaction_list: TransactionList) {
+        Query::select(self, pool, transaction_list, |_| QueryAction::Take)
     }
 }
 
@@ -138,8 +126,7 @@ pub trait Query {
     /// that's being restored.
     fn select(
         &mut self,
-        index: &reader::Reader,
-        object: &mut dyn object::Reader,
+        pool: Pool<AEADReader>,
         transaction_list: TransactionList,
         predicate: impl Fn(&Self::Key) -> QueryAction,
     );

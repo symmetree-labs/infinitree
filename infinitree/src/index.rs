@@ -55,34 +55,20 @@
 //! performance increase for certain use cases.
 
 use crate::{
-    compress,
-    crypto::Digest,
     fields::*,
-    object::{ObjectId, WriteObject},
+    object::{AEADReader, BufferedSink, Pool, Stream, Writer},
+    tree::CommitId,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use std::{error::Error, io::Cursor};
 
-mod header;
-pub mod reader;
-pub mod writer;
-
-pub(crate) use header::*;
-
-pub(crate) use reader::Reader;
-pub(crate) use writer::Writer;
-
-/// A representation of a generation within the tree
-pub type CommitId = Digest;
-
-pub(crate) type TransactionPointer = (CommitId, Field, ObjectId);
+pub(crate) type Field = String;
+pub(crate) type TransactionPointer = (CommitId, Field, Stream);
 
 /// A list of transactions, represented in order, for versions and fields
 pub(crate) type TransactionList = Vec<TransactionPointer>;
 
-type Encoder = compress::Encoder<WriteObject>;
-type Decoder =
-    crate::Deserializer<rmp_serde::decode::ReadReader<compress::Decoder<Cursor<Vec<u8>>>>>;
+pub trait Transaction: Send + Sync + std::io::Write {}
+impl<T> Transaction for T where T: Send + Sync + std::io::Write {}
 
 /// Any structure that is usable as an Index
 ///
@@ -114,16 +100,28 @@ pub trait FieldWriter: Send {
     fn write_next(&mut self, obj: impl Serialize + Send);
 }
 
+impl<T> FieldWriter for T
+where
+    T: std::io::Write + Send,
+{
+    fn write_next(&mut self, obj: impl Serialize + Send) {
+        crate::serialize_to_writer(self, &obj).unwrap();
+    }
+}
+
 /// Allows deserializing an infinite collection by reading records one by one.
 ///
 /// Implemented by a [`reader::Transaction`]. There's no need to implement this yourself.
 pub trait FieldReader: Send {
     /// Read the next available record from storage.
-    fn read_next<T: DeserializeOwned>(&mut self) -> Result<T, Box<dyn Error>>;
+    fn read_next<T: DeserializeOwned>(&mut self) -> anyhow::Result<T>;
 }
 
-impl FieldReader for Decoder {
-    fn read_next<T: DeserializeOwned>(&mut self) -> Result<T, Box<dyn Error>> {
+impl<'a, R> FieldReader for crate::Deserializer<R>
+where
+    R: rmp_serde::decode::ReadSlice<'a> + Send,
+{
+    fn read_next<T: DeserializeOwned>(&mut self) -> anyhow::Result<T> {
         Ok(T::deserialize(self)?)
     }
 }
@@ -140,8 +138,7 @@ pub(crate) trait IndexExt: Index {
     fn load_all_from(
         &mut self,
         full_transaction_list: &TransactionList,
-        index: &Reader,
-        object: &mut dyn crate::object::Reader,
+        pool: &Pool<AEADReader>,
     ) -> anyhow::Result<()> {
         // #accidentallyquadratic
 
@@ -152,63 +149,55 @@ pub(crate) trait IndexExt: Index {
                 .cloned()
                 .collect::<Vec<_>>();
 
-            self.load(commits_for_field, index, object, action);
+            self.load(commits_for_field, pool, action);
         }
         Ok(())
     }
 
-    fn commit(
+    fn commit<W: Writer + Send + Sync>(
         &mut self,
-        index: &mut Writer,
-        object: &mut dyn crate::object::Writer,
+        sink: &mut BufferedSink<W>,
+        object: &mut dyn Writer,
         mut hashed_data: Vec<u8>,
-    ) -> anyhow::Result<(CommitId, Vec<(Field, ObjectId)>)> {
+    ) -> anyhow::Result<(CommitId, Vec<(Field, Stream)>)> {
         let log = self
             .store_all()?
             .drain(..)
-            .map(|mut action| (action.name.clone(), self.store(index, object, &mut action)))
+            .map(|mut action| (action.name.clone(), self.store(sink, object, &mut action)))
             .collect();
         hashed_data.extend(crate::serialize_to_vec(&log)?);
 
         let version = crate::crypto::secure_hash(&hashed_data);
-        index.seal_and_store();
         Ok((version, log))
     }
 
-    fn store<'indexwriter>(
+    fn store<W: Writer + Send + Sync>(
         &self,
-        index: &'indexwriter mut Writer,
-        object: &mut dyn crate::object::Writer,
+        index: &mut BufferedSink<W>,
+        object: &mut dyn Writer,
         field: &mut Intent<Box<dyn Store>>,
-    ) -> ObjectId {
-        let mut tr = index.transaction(&field.name);
-
-        field.strategy.store(&mut tr, object);
-
-        tr.finish()
+    ) -> Stream {
+        field.strategy.store(index, object);
+        index.clear().unwrap()
     }
 
     fn load(
         &self,
         commits_for_field: TransactionList,
-        index: &Reader,
-        object: &mut dyn crate::object::Reader,
+        pool: &Pool<AEADReader>,
         field: &mut Intent<Box<dyn Load>>,
     ) {
-        field.strategy.load(index, object, commits_for_field);
+        field.strategy.load(pool.clone(), commits_for_field);
     }
 
     fn select<K>(
         &self,
         commits_for_field: TransactionList,
-        index: &Reader,
-        object: &mut dyn crate::object::Reader,
+        pool: &Pool<AEADReader>,
         mut field: Intent<Box<impl Query<Key = K>>>,
         pred: impl Fn(&K) -> QueryAction,
     ) {
-        field
-            .strategy
-            .select(index, object, commits_for_field, pred);
+        field.strategy.select(pool.clone(), commits_for_field, pred);
     }
 }
 
@@ -239,7 +228,7 @@ pub(crate) mod test {
         mut store: S,
         mut load: S,
     ) -> () {
-        use crate::{backends, crypto};
+        use crate::{backends, crypto, object::AEADWriter};
         use secrecy::Secret;
         use std::sync::Arc;
 
@@ -247,28 +236,22 @@ pub(crate) mod test {
         let crypto = crypto::ObjectOperations::new(key);
         let storage = Arc::new(backends::test::InMemoryBackend::default());
 
-        let object = {
-            let oid = ObjectId::new(&crypto);
-            let mut mw = super::Writer::new(oid, storage.clone(), crypto.clone()).unwrap();
-            let mut transaction = mw.transaction("field name");
-
-            Store::store(
-                &mut store,
-                &mut transaction,
-                &mut crate::object::AEADWriter::new(storage.clone(), crypto.clone()),
-            );
-
-            let obj = transaction.finish();
-            mw.seal_and_store();
-
-            obj
+        let writer = || AEADWriter::new(storage.clone(), crypto.clone());
+        let reader = {
+            let storage = storage.clone();
+            let crypto = crypto.clone();
+            move || AEADReader::new(storage.clone(), crypto.clone())
         };
 
-        let mut reader = crate::object::AEADReader::new(storage.clone(), crypto.clone());
+        let object = {
+            let mut transaction = BufferedSink::new(writer());
+            Store::store(&mut store, &mut transaction, &mut writer());
+            transaction.finish().unwrap()
+        };
+
         Load::load(
             &mut load,
-            &mut super::Reader::new(storage.clone(), crypto.clone()),
-            &mut reader,
+            Pool::with_constructor(0, reader),
             vec![(Digest::default(), "field name".into(), object)],
         );
     }

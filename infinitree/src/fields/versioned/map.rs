@@ -5,7 +5,7 @@ use crate::{
         depth::Incremental, Collection, Intent, Key, Load, LocalField, SparseField, Store,
         Strategy, Value,
     },
-    index::{writer, FieldWriter},
+    index::{FieldWriter, Transaction},
     object::{self, serializer::SizedPointer, ObjectError},
 };
 use scc::HashMap;
@@ -498,7 +498,14 @@ where
 
     #[inline(always)]
     fn insert(&mut self, record: Self::Item) {
-        assert!(self.field.base.insert(record.0, record.1).is_ok());
+        // we're optimizing for the case where the versions are
+        // restored from top to bottom, in reverse order.
+        // therefore:
+        // 1. do not insert a key if it already exists
+        // 2. do not restore a removed key
+        if let value @ Some(..) = record.1 {
+            let _ = self.field.base.insert(record.0, value);
+        }
     }
 }
 
@@ -508,11 +515,7 @@ where
     V: Value,
 {
     #[inline(always)]
-    fn store(
-        &mut self,
-        transaction: &mut writer::Transaction<'_>,
-        _object: &mut dyn object::Writer,
-    ) {
+    fn store(&mut self, mut transaction: &mut dyn Transaction, _object: &mut dyn object::Writer) {
         self.field.current.for_each(|k, v| {
             transaction.write_next((k, v));
         });
@@ -578,11 +581,7 @@ where
     V: Value,
 {
     #[inline(always)]
-    fn store(
-        &mut self,
-        transaction: &mut writer::Transaction<'_>,
-        writer: &mut dyn object::Writer,
-    ) {
+    fn store(&mut self, mut transaction: &mut dyn Transaction, writer: &mut dyn object::Writer) {
         self.field.current.for_each(|key, value| {
             let ptr = value.as_ref().map(|stored| {
                 object::serializer::write(
@@ -638,21 +637,22 @@ mod test {
         let storage = crate::backends::test::InMemoryBackend::shared();
 
         {
-            let mut tree = Infinitree::<VersionedMap<usize, usize>>::empty(storage.clone(), key());
+            let mut tree =
+                Infinitree::<VersionedMap<usize, usize>>::empty(storage.clone(), key()).unwrap();
             tree.index().insert(1000, 1000);
-            tree.commit(None);
+            tree.commit(None).unwrap();
             tree.index().clear();
 
             for i in 0..100 {
                 tree.index().insert(i, i + 1);
             }
 
-            tree.commit(None);
+            tree.commit(None).unwrap();
         }
 
         let mut tree =
             Infinitree::<VersionedMap<usize, usize>>::open(storage.clone(), key()).unwrap();
-        tree.load_all();
+        tree.load_all().unwrap();
 
         for i in 0..100 {
             assert_eq!(i + 1, *tree.index().get(&i).unwrap());

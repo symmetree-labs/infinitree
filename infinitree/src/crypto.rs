@@ -1,7 +1,4 @@
-use crate::{
-    chunks::RawChunkPointer,
-    object::{ObjectId, WriteObject},
-};
+use crate::{chunks::RawChunkPointer, object::ObjectId};
 
 use getrandom::getrandom;
 use ring::aead;
@@ -45,7 +42,7 @@ pub struct ObjectOperations {
     key: RawKey,
 }
 
-pub type IndexKey = ObjectOperations;
+pub type RootKey = ObjectOperations;
 pub type ChunkKey = ObjectOperations;
 
 #[inline]
@@ -57,18 +54,20 @@ pub fn secure_hash(content: &[u8]) -> Digest {
 }
 
 pub(crate) trait CryptoProvider: Random + Send + Sync + Clone {
-    fn encrypt_chunk(&self, object_id: &ObjectId, hash: &Digest, data: &mut [u8]) -> Tag;
-    fn encrypt_object(&self, object: &mut WriteObject);
+    fn encrypt_chunk(
+        &self,
+        object_id: Option<ObjectId>,
+        hash: &Digest,
+        data: &mut [u8],
+    ) -> RawChunkPointer;
 
     fn decrypt_chunk<'buf>(
         &self,
         target: &'buf mut [u8],
         source: &[u8],
-        source_id: &ObjectId,
+        source_id: Option<ObjectId>,
         chunk: &RawChunkPointer,
     ) -> &'buf mut [u8];
-
-    fn decrypt_object_into(&self, target: &mut [u8], source: &[u8], source_id: &ObjectId);
 }
 
 impl Key {
@@ -82,7 +81,7 @@ impl Key {
             .map(|k| ObjectId::from_bytes(k.expose_secret()))
     }
 
-    pub(crate) fn get_meta_key(&self) -> Result<IndexKey> {
+    pub(crate) fn get_root_key(&self) -> Result<RootKey> {
         derive_subkey(&self.master_key, "zerostash.com 2022 metadata key")
             .map(ObjectOperations::new)
     }
@@ -108,34 +107,34 @@ impl Random for ObjectOperations {
 
 impl CryptoProvider for ObjectOperations {
     #[inline]
-    fn encrypt_chunk(&self, object_id: &ObjectId, hash: &Digest, data: &mut [u8]) -> Tag {
+    fn encrypt_chunk(
+        &self,
+        object_id: Option<ObjectId>,
+        hash: &Digest,
+        data: &mut [u8],
+    ) -> RawChunkPointer {
+        // Since the keys are always rotating, it's generally safe to
+        // provide a predictible nonce
+        let nonce_base = object_id.unwrap_or_default();
         let aead = get_aead(derive_chunk_key(&self.key, hash));
-        let tag = aead
+        let ring_tag = aead
             .seal_in_place_separate_tag(
-                get_chunk_nonce(object_id, data.len() as u32),
+                get_chunk_nonce(&nonce_base, data.len() as u32),
                 aead::Aad::empty(),
                 data,
             )
             .unwrap();
 
-        let mut t = Tag::default();
-        t.copy_from_slice(tag.as_ref());
-        t
-    }
+        let mut tag = Tag::default();
+        tag.copy_from_slice(ring_tag.as_ref());
 
-    #[inline]
-    fn encrypt_object(&self, object: &mut WriteObject) {
-        let aead = get_aead(self.key.clone());
-
-        let tag = aead
-            .seal_in_place_separate_tag(
-                get_object_nonce(object.id()),
-                aead::Aad::empty(),
-                object.as_mut(),
-            )
-            .unwrap();
-
-        object.write_tag(tag.as_ref());
+        RawChunkPointer {
+            offs: 0,
+            size: data.len() as u32,
+            file: nonce_base,
+            hash: *hash,
+            tag,
+        }
     }
 
     #[inline]
@@ -143,11 +142,12 @@ impl CryptoProvider for ObjectOperations {
         &self,
         target: &'buf mut [u8],
         source: &[u8],
-        source_id: &ObjectId,
+        source_id: Option<ObjectId>,
         chunk: &RawChunkPointer,
     ) -> &'buf mut [u8] {
         let size = chunk.size as usize;
         let cyphertext_size = size + chunk.tag.len();
+        let nonce_base = source_id.unwrap_or_default();
 
         assert!(target.len() >= cyphertext_size);
 
@@ -159,22 +159,13 @@ impl CryptoProvider for ObjectOperations {
 
         let aead = get_aead(derive_chunk_key(&self.key, &chunk.hash));
         aead.open_in_place(
-            get_chunk_nonce(source_id, chunk.size),
+            get_chunk_nonce(&nonce_base, chunk.size),
             aead::Aad::empty(),
             &mut target[..cyphertext_size],
         )
         .unwrap();
 
         &mut target[..size]
-    }
-
-    #[inline]
-    fn decrypt_object_into(&self, target: &mut [u8], source: &[u8], source_id: &ObjectId) {
-        target.copy_from_slice(source);
-
-        let aead = get_aead(self.key.clone());
-        aead.open_in_place(get_object_nonce(source_id), aead::Aad::empty(), target)
-            .unwrap();
     }
 }
 
@@ -192,15 +183,6 @@ fn derive_chunk_key(key_src: &RawKey, hash: &Digest) -> RawKey {
         key[i] ^= hash[i];
     }
     Secret::new(key)
-}
-
-#[inline]
-fn get_object_nonce(object_id: &ObjectId) -> aead::Nonce {
-    let mut nonce = Nonce::default();
-    let len = nonce.len();
-
-    nonce.copy_from_slice(&object_id.as_ref()[..len]);
-    aead::Nonce::assume_unique_for_key(nonce)
 }
 
 #[inline]
@@ -245,37 +227,9 @@ fn derive_subkey(key: &RawKey, ctx: &str) -> Result<RawKey> {
 #[cfg(test)]
 mod test {
     #[test]
-    fn test_object_encryption() {
-        use super::{CryptoProvider, ObjectOperations};
-        use crate::object::WriteObject;
-        use secrecy::Secret;
-
-        let key = Secret::new(*b"abcdef1234567890abcdef1234567890");
-        let cleartext = b"the quick brown fox jumps over the lazy crab";
-        let len = cleartext.len();
-
-        let crypto = ObjectOperations::new(key);
-        let mut obj = WriteObject::default();
-        obj.reserve_tag();
-
-        let slice: &mut [u8] = obj.as_mut();
-        slice[..len].copy_from_slice(cleartext);
-
-        crypto.encrypt_object(&mut obj);
-
-        let mut decrypted = WriteObject::default();
-        crypto.decrypt_object_into(decrypted.as_inner_mut(), obj.as_inner(), obj.id());
-
-        // do it again, because reusing target buffers is fair game
-        crypto.decrypt_object_into(decrypted.as_inner_mut(), obj.as_inner(), obj.id());
-
-        assert_eq!(&decrypted.as_inner()[..len], &cleartext[..]);
-    }
-
-    #[test]
     fn test_chunk_encryption() {
         use super::{CryptoProvider, ObjectOperations};
-        use crate::{chunks::RawChunkPointer, object::WriteObject};
+        use crate::object::WriteObject;
         use secrecy::Secret;
         use std::io::Write;
 
@@ -287,18 +241,11 @@ mod test {
         let mut obj = WriteObject::default();
 
         let mut encrypted = cleartext.clone();
-        let tag = crypto.encrypt_chunk(obj.id(), hash, &mut encrypted);
-        let cp = RawChunkPointer {
-            offs: 0,
-            size: size as u32,
-            hash: *hash,
-            tag,
-            ..RawChunkPointer::default()
-        };
+        let cp = crypto.encrypt_chunk(Some(*obj.id()), hash, &mut encrypted);
         obj.write(&encrypted).unwrap();
 
-        let mut decrypted = vec![0; size + tag.len()];
-        crypto.decrypt_chunk(&mut decrypted, obj.as_ref(), obj.id(), &cp);
+        let mut decrypted = vec![0; size + cp.tag.len()];
+        crypto.decrypt_chunk(&mut decrypted, obj.as_ref(), Some(*obj.id()), &cp);
 
         assert_eq!(&decrypted[..size], cleartext.as_ref());
     }

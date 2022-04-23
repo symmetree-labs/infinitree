@@ -10,13 +10,14 @@
 //! Note that during queries and loads, commits are walked in _reverse
 //! order_, last one first.
 
-use crate::index::{reader, TransactionList};
+use crate::index::TransactionList;
+use crate::object::{AEADReader, DeserializeStream, Pool};
 
 pub trait Depth: sealed::Sealed {
-    fn resolve<'r, R: 'r + AsRef<reader::Reader>>(
-        index: R,
+    fn resolve(
+        index: Pool<AEADReader>,
         transactions: TransactionList,
-    ) -> Box<dyn Iterator<Item = reader::Transaction> + 'r>;
+    ) -> Box<dyn Iterator<Item = DeserializeStream>>;
 }
 
 mod sealed {
@@ -33,33 +34,35 @@ pub struct Incremental;
 pub struct Snapshot;
 
 #[inline(always)]
-fn full_history<'r>(
-    index: impl AsRef<reader::Reader> + 'r,
+fn full_history(
+    pool: Pool<AEADReader>,
     transactions: TransactionList,
-) -> impl Iterator<Item = reader::Transaction> + 'r {
+) -> impl Iterator<Item = DeserializeStream> {
     transactions
         .into_iter()
-        .filter_map(move |(_gen, field, objectid)| {
-            index.as_ref().transaction(field, &objectid).ok()
+        .filter_map(move |(_gen, _field, stream)| {
+            pool.lease()
+                .ok()
+                .map(|r| DeserializeStream::new(stream.open_reader(r)))
         })
 }
 
 impl Depth for Incremental {
     #[inline(always)]
-    fn resolve<'r, R: 'r + AsRef<reader::Reader>>(
-        index: R,
+    fn resolve(
+        index: Pool<AEADReader>,
         transactions: TransactionList,
-    ) -> Box<dyn Iterator<Item = reader::Transaction> + 'r> {
+    ) -> Box<dyn Iterator<Item = DeserializeStream>> {
         Box::new(full_history(index, transactions))
     }
 }
 
 impl Depth for Snapshot {
     #[inline(always)]
-    fn resolve<'r, R: 'r + AsRef<reader::Reader>>(
-        index: R,
+    fn resolve(
+        index: Pool<AEADReader>,
         transactions: TransactionList,
-    ) -> Box<dyn Iterator<Item = reader::Transaction> + 'r> {
+    ) -> Box<dyn Iterator<Item = DeserializeStream>> {
         Box::new(full_history(index, transactions).take(1))
     }
 }

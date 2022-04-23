@@ -2,13 +2,16 @@
 use crate::{
     backends::BackendError,
     compress::{CompressError, DecompressError},
-    crypto::{Random, Tag},
+    crypto::Random,
     BLOCK_SIZE,
 };
 
 use thiserror::Error;
 
-use std::{io, mem::size_of, sync::Arc};
+use std::{io, sync::Arc};
+
+mod pool;
+pub use pool::{buffer::BlockBuffer, writer::WriterPool, Pool, PoolRef};
 
 mod reader;
 pub use reader::{AEADReader, Reader};
@@ -17,14 +20,12 @@ mod writer;
 pub use writer::{AEADWriter, Writer};
 
 mod bufferedstream;
-pub use bufferedstream::{BufferedSink, BufferedStream, StreamChunks};
+pub use bufferedstream::*;
 
 pub mod serializer;
 
 mod id;
 pub use id::ObjectId;
-
-pub mod write_balancer;
 
 #[derive(Error, Debug)]
 pub enum ObjectError {
@@ -69,22 +70,17 @@ pub type Result<T> = std::result::Result<T, ObjectError>;
 pub type WriteObject = Object<BlockBuffer>;
 pub type ReadObject = Object<ReadBuffer>;
 
-#[derive(Clone)]
-pub struct BlockBuffer(Box<[u8]>);
 pub struct ReadBuffer(ReadBufferInner);
 type ReadBufferInner = Arc<dyn AsRef<[u8]> + Send + Sync + 'static>;
 
-impl<RO> From<RO> for WriteObject
+impl<RO> From<RO> for Object<BlockBuffer>
 where
     RO: AsRef<ReadObject>,
 {
-    fn from(rwr: RO) -> WriteObject {
+    fn from(rwr: RO) -> Object<BlockBuffer> {
         let rw = rwr.as_ref();
 
-        Object::with_id(
-            rw.id,
-            BlockBuffer(rw.buffer.as_ref().to_vec().into_boxed_slice()),
-        )
+        Object::with_id(rw.id, rw.buffer.as_ref().to_vec().into_boxed_slice().into())
     }
 }
 
@@ -116,31 +112,9 @@ impl AsRef<[u8]> for ReadBuffer {
     }
 }
 
-impl Default for BlockBuffer {
-    #[inline]
-    fn default() -> BlockBuffer {
-        BlockBuffer(vec![0; BLOCK_SIZE].into_boxed_slice())
-    }
-}
-
-impl AsMut<[u8]> for BlockBuffer {
-    #[inline(always)]
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.0.as_mut()
-    }
-}
-
-impl AsRef<[u8]> for BlockBuffer {
-    #[inline(always)]
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
 pub struct Object<T> {
     id: ObjectId,
     buffer: T,
-    capacity: usize,
     cursor: usize,
 }
 
@@ -149,7 +123,6 @@ impl<T> Object<T> {
         Object {
             id: ObjectId::default(),
             cursor: 0,
-            capacity: BLOCK_SIZE,
             buffer,
         }
     }
@@ -171,22 +144,13 @@ impl<T> Object<T> {
     }
 
     #[inline(always)]
-    pub fn capacity(&self) -> usize {
-        self.capacity
+    pub const fn capacity(&self) -> usize {
+        BLOCK_SIZE
     }
 
     #[inline(always)]
     pub fn position(&self) -> usize {
         self.cursor
-    }
-
-    #[inline(always)]
-    pub fn reset_cursor(&mut self) {
-        self.cursor = 0;
-    }
-
-    pub fn reserve_tag(&mut self) {
-        self.capacity = BLOCK_SIZE - size_of::<Tag>();
     }
 }
 
@@ -203,7 +167,6 @@ where
         let mut object = Object {
             id: ObjectId::default(),
             cursor: 0,
-            capacity: buffer.as_ref().len(),
             buffer,
         };
         object.set_id(id);
@@ -229,7 +192,7 @@ where
 
     #[inline(always)]
     pub fn tail_mut(&mut self) -> &mut [u8] {
-        &mut self.buffer.as_mut()[self.cursor..self.capacity]
+        &mut self.buffer.as_mut()[self.cursor..]
     }
 
     pub fn position_mut(&mut self) -> &mut usize {
@@ -237,13 +200,13 @@ where
     }
 
     #[inline(always)]
-    pub fn write_tag(&mut self, buf: &[u8]) {
-        self.buffer.as_mut()[self.capacity..].copy_from_slice(buf);
+    pub fn write_head(&mut self, buf: &[u8]) {
+        self.buffer.as_mut()[..buf.len()].copy_from_slice(buf);
     }
 
     #[inline(always)]
-    pub fn write_head(&mut self, buf: &[u8]) {
-        self.buffer.as_mut()[..buf.len()].copy_from_slice(buf);
+    pub fn randomize_head(&mut self, random: &impl Random, size: usize) {
+        random.fill(&mut self.buffer.as_mut()[..size])
     }
 
     #[inline(always)]
@@ -293,11 +256,12 @@ where
 }
 
 impl<T> io::Seek for Object<T> {
+    #[inline(always)]
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         use io::SeekFrom::*;
 
-        let umax = self.capacity as u64;
-        let imax = self.capacity as i64;
+        let umax = self.capacity() as u64;
+        let imax = self.capacity() as i64;
 
         match pos {
             Start(s) => match s {
@@ -311,7 +275,7 @@ impl<T> io::Seek for Object<T> {
                 e if e < 0 => Err(io::Error::from(io::ErrorKind::InvalidInput)),
                 e if e > imax => Err(io::Error::from(io::ErrorKind::InvalidInput)),
                 e => {
-                    self.cursor = self.capacity - e as usize;
+                    self.cursor = self.capacity() - e as usize;
                     Ok(self.cursor as u64)
                 }
             },
@@ -339,7 +303,6 @@ where
         Object {
             id: self.id,
             buffer: self.buffer.clone(),
-            capacity: self.capacity,
             cursor: self.cursor,
         }
     }
@@ -354,7 +317,6 @@ where
         Object {
             id: ObjectId::default(),
             cursor: 0,
-            capacity: buffer.as_ref().len(),
             buffer,
         }
     }
@@ -366,7 +328,7 @@ where
 {
     #[inline(always)]
     fn as_ref(&self) -> &[u8] {
-        &self.buffer.as_ref()[..self.capacity]
+        self.buffer.as_ref()
     }
 }
 
@@ -376,7 +338,7 @@ where
 {
     #[inline(always)]
     fn as_mut(&mut self) -> &mut [u8] {
-        &mut self.buffer.as_mut()[..self.capacity]
+        self.buffer.as_mut()
     }
 }
 

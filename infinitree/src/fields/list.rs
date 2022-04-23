@@ -2,7 +2,7 @@ use super::{
     depth::Snapshot, Collection, Intent, Load, LocalField, SparseField, Store, Strategy, Value,
 };
 use crate::{
-    index::{writer, FieldWriter},
+    index::{FieldWriter, Transaction},
     object::{self, serializer::SizedPointer, ObjectError},
 };
 use std::sync::Arc;
@@ -17,11 +17,7 @@ impl<T> Store for LocalField<List<T>>
 where
     T: Value,
 {
-    fn store(
-        &mut self,
-        transaction: &mut writer::Transaction<'_>,
-        _object: &mut dyn object::Writer,
-    ) {
+    fn store(&mut self, mut transaction: &mut dyn Transaction, _object: &mut dyn object::Writer) {
         for v in self.field.read().iter() {
             transaction.write_next(v);
         }
@@ -54,11 +50,7 @@ impl<T> Store for SparseField<List<T>>
 where
     T: Value,
 {
-    fn store(
-        &mut self,
-        transaction: &mut writer::Transaction<'_>,
-        writer: &mut dyn object::Writer,
-    ) {
+    fn store(&mut self, mut transaction: &mut dyn Transaction, writer: &mut dyn object::Writer) {
         for v in self.field.read().iter() {
             let ptr = object::serializer::write(
                 writer,

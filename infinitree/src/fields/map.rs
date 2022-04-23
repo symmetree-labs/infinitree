@@ -1,8 +1,6 @@
-use super::{
-    writer, Collection, Intent, Key, Load, LocalField, SparseField, Store, Strategy, Value,
-};
+use super::{Collection, Intent, Key, Load, LocalField, SparseField, Store, Strategy, Value};
 use crate::{
-    index::FieldWriter,
+    index::{FieldWriter, Transaction},
     object::{self, serializer::SizedPointer, ObjectError},
 };
 use scc::HashMap;
@@ -123,11 +121,7 @@ where
     K: Key,
     V: Value,
 {
-    fn store(
-        &mut self,
-        transaction: &mut writer::Transaction<'_>,
-        _object: &mut dyn object::Writer,
-    ) {
+    fn store(&mut self, mut transaction: &mut dyn Transaction, _object: &mut dyn object::Writer) {
         self.field.for_each(|k, v| {
             transaction.write_next((k, v));
         })
@@ -162,11 +156,7 @@ where
     K: Key,
     V: Value,
 {
-    fn store(
-        &mut self,
-        transaction: &mut writer::Transaction<'_>,
-        writer: &mut dyn object::Writer,
-    ) {
+    fn store(&mut self, mut transaction: &mut dyn Transaction, writer: &mut dyn object::Writer) {
         self.field.for_each(|key, value| {
             let ptr = object::serializer::write(
                 writer,

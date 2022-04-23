@@ -1,4 +1,4 @@
-use super::{reader, Collection, FieldReader};
+use super::{Collection, FieldReader};
 use crate::object;
 use std::{marker::PhantomData, sync::Arc};
 
@@ -12,26 +12,21 @@ pub enum QueryAction {
     Abort,
 }
 
-pub(crate) struct QueryIteratorOwned<T, F, R> {
-    transaction: reader::Transaction,
-    object: R,
-    predicate: Arc<F>,
+pub(crate) struct QueryIteratorOwned<T, Predicate, Reader, Transaction> {
+    transaction: Transaction,
+    object: Reader,
+    predicate: Arc<Predicate>,
     _fieldtype: PhantomData<T>,
 }
 
-impl<T, K, R, F> QueryIteratorOwned<T, F, R>
+impl<T, K, R, F, FR> QueryIteratorOwned<T, F, R, FR>
 where
     T: Collection<Key = K>,
     F: Fn(&K) -> QueryAction,
+    FR: FieldReader,
     R: object::Reader,
 {
-    pub fn new(
-        mut transaction: reader::Transaction,
-        mut object: R,
-        predicate: Arc<F>,
-        field: &mut T,
-    ) -> Self {
-        field.load_head(&mut transaction, &mut object);
+    pub fn new(transaction: FR, object: R, predicate: Arc<F>, _field: &mut T) -> Self {
         Self {
             transaction,
             object,
@@ -41,10 +36,11 @@ where
     }
 }
 
-impl<T, K, R, F> Iterator for QueryIteratorOwned<T, F, R>
+impl<T, K, R, F, FR> Iterator for QueryIteratorOwned<T, F, R, FR>
 where
     T: Collection<Key = K>,
     F: Fn(&K) -> QueryAction,
+    FR: FieldReader,
     R: object::Reader,
 {
     type Item = <T as Collection>::Item;
@@ -65,25 +61,25 @@ where
     }
 }
 
-pub(crate) struct QueryIterator<'reader, T, F> {
-    transaction: reader::Transaction,
+pub(crate) struct QueryIterator<'reader, T, Predicate, Transaction> {
+    transaction: Transaction,
     object: &'reader mut dyn object::Reader,
-    predicate: Arc<F>,
+    predicate: Arc<Predicate>,
     _fieldtype: PhantomData<T>,
 }
 
-impl<'reader, T, K, F> QueryIterator<'reader, T, F>
+impl<'reader, T, K, F, FR> QueryIterator<'reader, T, F, FR>
 where
     T: Collection<Key = K>,
     F: Fn(&K) -> QueryAction,
+    FR: FieldReader,
 {
     pub fn new(
-        mut transaction: reader::Transaction,
+        transaction: FR,
         object: &'reader mut dyn object::Reader,
         predicate: Arc<F>,
-        field: &mut T,
+        _field: &mut T,
     ) -> Self {
-        field.load_head(&mut transaction, object);
         Self {
             transaction,
             object,
@@ -93,10 +89,11 @@ where
     }
 }
 
-impl<'reader, T, K, F> Iterator for QueryIterator<'reader, T, F>
+impl<'reader, T, K, F, FR> Iterator for QueryIterator<'reader, T, F, FR>
 where
     T: Collection<Key = K>,
     F: Fn(&K) -> QueryAction,
+    FR: FieldReader,
 {
     type Item = <T as Collection>::Item;
 

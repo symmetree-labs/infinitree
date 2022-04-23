@@ -4,125 +4,23 @@
 use crate::{
     fields::{
         self, depth::Depth, Collection, Intent, Load, Query, QueryAction, QueryIteratorOwned,
-        Serialized, Store,
     },
-    index::{self, CommitId, Index, IndexExt, TransactionList},
-    object::{AEADReader, AEADWriter},
-    Backend, Key, ObjectId,
+    index::{self, Index, IndexExt, TransactionList},
+    object::{AEADReader, AEADWriter, BlockBuffer, BufferedSink, Pool, PoolRef},
+    Backend, Key,
 };
 use anyhow::Result;
 use parking_lot::RwLock;
 use serde::{de::DeserializeOwned, Serialize};
-use serde_with::serde_as;
 use std::{ops::Deref, sync::Arc, time::SystemTime};
 
-/// Identifies a cryptographically secured set of transactions on the tree.
-#[serde_as]
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Commit<CustomData>
-where
-    CustomData: Serialize,
-{
-    id: CommitId,
-    metadata: CommitMetadata<CustomData>,
-}
+mod commit;
+pub use commit::*;
 
-/// All the protected parts of a [`Commit`]
-#[serde_as]
-#[derive(Serialize, Deserialize, Debug)]
-pub struct CommitMetadata<CustomData>
-where
-    CustomData: Serialize,
-{
-    previous: Option<CommitId>,
-    message: Option<String>,
-    #[serde_as(as = "serde_with::TimestampSecondsWithFrac<f64>")]
-    time: SystemTime,
+mod root;
+pub(crate) use root::*;
 
-    custom_data: CustomData,
-}
-
-impl<CustomData: Serialize + Default> Default for CommitMetadata<CustomData> {
-    fn default() -> Self {
-        Self {
-            time: SystemTime::now(),
-            previous: None,
-            message: None,
-            custom_data: CustomData::default(),
-        }
-    }
-}
-
-/// Enum to navigate the versions that are available in an Infinitree
-#[allow(unused)]
-pub enum CommitFilter {
-    /// On querying, all versions will be crawled. This is the
-    /// default.
-    All,
-    /// Only a single generation will be looked at during querying.
-    Single(CommitId),
-    /// All generations up to and including the given one will be queried.
-    UpTo(CommitId),
-    /// Only use generations between the two given versions.
-    /// The first parameter **must** be earlier generation than the
-    /// second.
-    Range(CommitId, CommitId),
-}
-
-impl Default for CommitFilter {
-    fn default() -> Self {
-        Self::All
-    }
-}
-
-/// The root index of the tree that stores version information
-#[derive(infinitree_macros::Index)]
-struct RootIndex<CustomData>
-where
-    CustomData: Serialize + DeserializeOwned + Send + Sync + 'static,
-{
-    /// Transaction log of individual fields included in each
-    /// generation.
-    ///
-    /// The last generation's transactions are at _the front_, so
-    /// looping through this naively will yield the last commit
-    /// _first_.
-    transaction_log: Serialized<TransactionList>,
-
-    /// Chronologically ordered list of commits
-    commit_list: Serialized<Vec<Commit<CustomData>>>,
-}
-
-impl<CustomData> Default for RootIndex<CustomData>
-where
-    CustomData: Serialize + DeserializeOwned + Send + Sync + 'static,
-{
-    fn default() -> Self {
-        Self {
-            transaction_log: Serialized::default(),
-            commit_list: Serialized::default(),
-        }
-    }
-}
-
-impl<CustomData> RootIndex<CustomData>
-where
-    CustomData: Serialize + DeserializeOwned + Send + Sync,
-{
-    fn version_after(&self, gen: &CommitId) -> Option<CommitId> {
-        let handle = self.commit_list.read();
-
-        // walking in reverse may hit faster
-        let mut iter = handle.iter().rev().map(|c| c.id).peekable();
-        while let Some(i) = iter.next() {
-            if Some(gen) == iter.peek() {
-                return Some(i);
-            }
-        }
-
-        None
-    }
-}
+mod sealed_root;
 
 /// An Infinitree root.
 ///
@@ -147,6 +45,9 @@ where
 
     /// These are the generations we're currently working on.
     commit_filter: CommitFilter,
+
+    /// Pool for object readers
+    reader_pool: Pool<AEADReader>,
 }
 
 impl<I, CustomData> Drop for Infinitree<I, CustomData>
@@ -177,9 +78,9 @@ where
     /// let mut tree = Infinitree::<Measurements>::empty(
     ///     Directory::new("/storage").unwrap(),
     ///     Key::from_credentials("username", "password").unwrap()
-    /// );
+    /// ).unwrap();
     /// ```
-    pub fn empty(backend: Arc<dyn Backend>, master_key: Key) -> Self {
+    pub fn empty(backend: Arc<dyn Backend>, master_key: Key) -> Result<Self> {
         Self::with_key(backend, I::default(), master_key)
     }
 
@@ -189,81 +90,30 @@ where
     /// metadata.
     pub fn open(backend: Arc<dyn Backend>, master_key: Key) -> Result<Self> {
         let root_object = master_key.root_object_id()?;
-        let mut root = RootIndex::default();
+        let root_key = master_key.get_root_key()?;
 
-        open_root(&mut root, backend.clone(), &master_key, root_object)?;
+        let root = sealed_root::open(
+            root_object,
+            BlockBuffer::default(),
+            backend.clone(),
+            root_key,
+        )?;
 
+        let chunk_key = master_key.get_object_key()?;
+        let reader_pool = {
+            let backend = backend.clone();
+            Pool::with_constructor(0, move || {
+                AEADReader::new(backend.clone(), chunk_key.clone())
+            })
+        };
         Ok(Self {
             root,
-            backend,
             master_key,
+            reader_pool,
+            backend: backend.clone(),
             index: I::default().into(),
             commit_filter: CommitFilter::default(),
         })
-    }
-}
-
-fn open_root<CustomData: Serialize + DeserializeOwned + Send + Sync>(
-    root: &mut RootIndex<CustomData>,
-    backend: Arc<dyn Backend>,
-    master_key: &Key,
-    root_object: ObjectId,
-) -> Result<()> {
-    let reader = index::Reader::new(backend.clone(), master_key.get_meta_key()?);
-
-    root.load_all_from(
-        &root
-            .fields()
-            .iter()
-            .cloned()
-            .map(|fname| (crate::Digest::default(), fname, root_object))
-            .collect::<TransactionList>(),
-        &reader,
-        &mut AEADReader::new(backend.clone(), master_key.get_object_key()?),
-    )?;
-
-    Ok(())
-}
-
-/// A commit message. Mostly equivalent to Option<String>.
-///
-/// The main reason for a separate wrapper type is being able to use
-/// versatile `From<T>` implementations that in return make the
-/// `Infinitree` API nicer to use.
-pub enum Message {
-    /// No commit message.
-    Empty,
-    /// Use the `String` parameter as commit message
-    Some(String),
-}
-
-impl From<&str> for Message {
-    fn from(from: &str) -> Self {
-        Self::Some(from.to_string())
-    }
-}
-
-impl From<Option<String>> for Message {
-    fn from(from: Option<String>) -> Self {
-        match from {
-            Some(s) => Self::Some(s),
-            None => Self::Empty,
-        }
-    }
-}
-
-impl From<String> for Message {
-    fn from(from: String) -> Self {
-        Self::Some(from)
-    }
-}
-
-impl From<Message> for Option<String> {
-    fn from(from: Message) -> Option<String> {
-        match from {
-            Message::Empty => None,
-            Message::Some(s) => Some(s),
-        }
     }
 }
 
@@ -286,7 +136,7 @@ where
     /// let mut tree = Infinitree::<infinitree::fields::VersionedMap<String, String>>::empty(
     ///     Directory::new("/storage").unwrap(),
     ///     Key::from_credentials("username", "password").unwrap()
-    /// );
+    /// ).unwrap();
     ///
     /// // Commit message can be omitted using `None`
     /// tree.commit(None);
@@ -319,14 +169,19 @@ where
     /// This is primarily useful if you're done writing an `Index`,
     /// and want to commit and persist it, or if you need extra
     /// initialization because `Default` is not viable.
-    pub fn with_key(backend: Arc<dyn Backend>, index: I, master_key: Key) -> Self {
-        Self {
-            backend,
+    pub fn with_key(backend: Arc<dyn Backend>, index: I, master_key: Key) -> Result<Self> {
+        let chunk_key = master_key.get_object_key()?;
+
+        Ok(Self {
             master_key,
+            backend: backend.clone(),
             index: index.into(),
             root: RootIndex::default(),
             commit_filter: CommitFilter::default(),
-        }
+            reader_pool: Pool::with_constructor(0, move || {
+                AEADReader::new(backend.clone(), chunk_key.clone())
+            }),
+        })
     }
 
     /// Return all generations in the tree.
@@ -363,14 +218,11 @@ where
     ///
     /// For full documentation, please read [`Infinitree::commit`].
     pub fn commit_with_metadata(&mut self, metadata: CommitMetadata<CustomData>) -> Result<()> {
-        let key = self.master_key.get_meta_key()?;
-        let start_meta = ObjectId::new(&key);
-
-        let mut index = index::Writer::new(start_meta, self.backend.clone(), key.clone())?;
         let mut object = self.object_writer()?;
+        let mut sink = BufferedSink::new(self.object_writer()?);
 
         let (id, changeset) = self.index.write().commit(
-            &mut index,
+            &mut sink,
             &mut object,
             crate::serialize_to_vec(&metadata)?,
         )?;
@@ -387,37 +239,20 @@ where
             tr_log.extend(history);
         }
 
-        let mut index =
-            index::Writer::new(self.master_key.root_object_id()?, self.backend.clone(), key)?;
-
-        // ok to discard this as we're flushing the whole root object
-        // anyway
-        let _ = self.root.commit(&mut index, &mut object, vec![])?;
+        sealed_root::commit(
+            &mut self.root,
+            self.master_key.root_object_id()?,
+            self.backend.clone(),
+            self.master_key.get_root_key()?,
+        )?;
         Ok(())
     }
 
     /// Load into memory all fields for the selected version ranges
     pub fn load_all(&mut self) -> Result<()> {
-        self.index.write().load_all_from(
-            &self.filter_generations(),
-            &self.meta_reader()?,
-            &mut self.object_reader()?,
-        )
-    }
-
-    /// I don't think this function makes sense publicly in this form.
-    ///
-    /// TODO: how this would work well is an open question.
-    #[allow(unused)]
-    pub(crate) fn store(&self, field: impl Into<Intent<Box<dyn Store>>>) -> Result<ObjectId> {
-        let mut field = field.into();
-        let start_object = self.store_start_object(&field.name);
-
-        Ok(self.index.read().store(
-            &mut self.meta_writer(start_object)?,
-            &mut self.object_writer()?,
-            &mut field,
-        ))
+        self.index
+            .write()
+            .load_all_from(&self.filter_generations(), &self.reader_pool)
     }
 
     /// Load the field for the selected generation set
@@ -425,11 +260,9 @@ where
         let mut field = field.into();
         let commits_for_field = self.field_for_version(&field.name);
 
-        field.strategy.load(
-            &self.meta_reader()?,
-            &mut self.object_reader()?,
-            commits_for_field,
-        );
+        field
+            .strategy
+            .load(self.reader_pool.clone(), commits_for_field);
 
         Ok(())
     }
@@ -442,12 +275,9 @@ where
     ) -> Result<()> {
         let commits_for_field = self.field_for_version(&field.name);
 
-        field.strategy.select(
-            &self.meta_reader()?,
-            &mut self.object_reader()?,
-            commits_for_field,
-            pred,
-        );
+        field
+            .strategy
+            .select(self.reader_pool.clone(), commits_for_field, pred);
 
         Ok(())
     }
@@ -463,26 +293,19 @@ where
         Q: Collection<Key = K, Item = O> + 'static,
     {
         let pred = Arc::new(pred);
-        let index = self.meta_reader()?;
-        let object = self.object_reader()?;
         let commits_for_field = self.field_for_version(&field.name);
 
         Ok(
-            <Q as Collection>::Depth::resolve(index, commits_for_field).flat_map(
-                move |transaction| {
+            <Q as Collection>::Depth::resolve(self.reader_pool.clone(), commits_for_field)
+                .flat_map(move |transaction| {
                     QueryIteratorOwned::new(
                         transaction,
-                        object.clone(),
+                        self.reader_pool.lease().unwrap(),
                         pred.clone(),
                         field.strategy.as_mut(),
                     )
-                },
-            ),
+                }),
         )
-    }
-
-    fn store_start_object(&self, _name: &str) -> ObjectId {
-        ObjectId::new(&self.master_key.get_meta_key().unwrap())
     }
 
     fn filter_generations(&self) -> TransactionList {
@@ -521,21 +344,6 @@ where
             .collect::<Vec<_>>()
     }
 
-    fn meta_writer(&self, start_object: ObjectId) -> Result<index::Writer> {
-        Ok(index::Writer::new(
-            start_object,
-            self.backend.clone(),
-            self.master_key.get_meta_key()?,
-        )?)
-    }
-
-    fn meta_reader(&self) -> Result<index::Reader> {
-        Ok(index::Reader::new(
-            self.backend.clone(),
-            self.master_key.get_meta_key()?,
-        ))
-    }
-
     /// Return a handle for an object writer.
     ///
     /// This can be used to manually write sparse data if you don't
@@ -557,11 +365,8 @@ where
     /// that you get when using an [`AEADWriter`] stack manually.
     ///
     /// You can obtain an [`AEADWriter`] using [`object_writer`][Self::object_writer].
-    pub fn object_reader(&self) -> Result<AEADReader> {
-        Ok(AEADReader::new(
-            self.backend.clone(),
-            self.master_key.get_object_key()?,
-        ))
+    pub fn object_reader(&self) -> Result<PoolRef<AEADReader>> {
+        Ok(self.reader_pool.lease()?)
     }
 
     /// Return an immutable reference to the internal index.
