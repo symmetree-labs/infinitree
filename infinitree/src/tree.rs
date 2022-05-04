@@ -22,6 +22,14 @@ pub(crate) use root::*;
 
 mod sealed_root;
 
+/// Allows changing commit behaviour.
+pub enum CommitMode {
+    /// Always create a new commit even if it's empty.
+    Always,
+    /// Only create a new commit when there are changes to the index.
+    OnlyOnChange,
+}
+
 /// An Infinitree root.
 ///
 /// This is primarily a wrapper around an [`Index`] that manages
@@ -121,7 +129,7 @@ impl<I: Index, CustomData> Infinitree<I, CustomData>
 where
     CustomData: Serialize + DeserializeOwned + Send + Sync + Default,
 {
-    /// Commit changes currently in the index.
+    /// Create a commit if there are changes in the index.
     ///
     /// This persists currently in-memory data, and also records the
     /// commit with `message` to the log.
@@ -156,7 +164,7 @@ where
             ..Default::default()
         };
 
-        self.commit_with_metadata(metadata)
+        self.commit_with_metadata(metadata, CommitMode::OnlyOnChange)
     }
 }
 
@@ -202,6 +210,7 @@ where
     pub fn commit_with_custom_data(
         &mut self,
         message: impl Into<Message>,
+        mode: CommitMode,
         custom_data: CustomData,
     ) -> Result<()> {
         let metadata = CommitMetadata {
@@ -211,13 +220,17 @@ where
             custom_data,
         };
 
-        self.commit_with_metadata(metadata)
+        self.commit_with_metadata(metadata, mode)
     }
 
     /// Commit using manually prepared metadata
     ///
     /// For full documentation, please read [`Infinitree::commit`].
-    pub fn commit_with_metadata(&mut self, metadata: CommitMetadata<CustomData>) -> Result<()> {
+    pub fn commit_with_metadata(
+        &mut self,
+        metadata: CommitMetadata<CustomData>,
+        mode: CommitMode,
+    ) -> Result<()> {
         let mut object = self.object_writer()?;
         let mut sink = BufferedSink::new(self.object_writer()?);
 
@@ -226,6 +239,12 @@ where
             &mut object,
             crate::serialize_to_vec(&metadata)?,
         )?;
+
+        if let CommitMode::OnlyOnChange = mode {
+            if changeset.iter().all(|(_, stream)| stream.is_empty()) {
+                return Ok(());
+            }
+        }
 
         self.root.commit_list.write().push(Commit { id, metadata });
 
