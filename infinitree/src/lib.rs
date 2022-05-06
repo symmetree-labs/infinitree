@@ -1,19 +1,39 @@
 //! Infinitree is a versioned, embedded database that uses uniform,
 //! encrypted blobs to store data.
 //!
-//! Multiple writers can use the same storage, but not the same tree
-//! safely at the same time.
+//! Infinitree is based on a set of lockless and locking data
+//! structures that you can use in your application as a regular map
+//! or list.
 //!
-//! Calling Infinitree a database may be generous, as all
-//! persistence-related operations are explicit.
+//! Data structures:
+//!
+//!  * [`fields::VersionedMap`]: A lockless HashMap that tracks incremental changes
+//!  * [`fields::Map`]: A lockless HashMap
+//!  * [`fields::LinkedList`]: Linked list that tracks incremental changes
+//!  * [`fields::List`]: A simple `RwLock<Vec<_>>` alias
+//!  * [`fields::Serialized`]: Any type that implements [`serde::Serialize`]
+//!
+//! Tight control over resources allows you to use it in situations
+//! where memory is scarce, and fall back to querying from slower
+//! storage.
+//!
+//! Additionally, Infinitree is useful for securely storing and sharing
+//! any [`serde`](https://docs.rs/serde) serializable application
+//! state, or dumping and loading application state changes through
+//! commits. This is similar to [Git](https://git-scm.com).
+//!
+//! In case you're looking to store large amounts of binary blobs, you
+//! can open a [`BufferedSink`][object::BufferedSink], which supports
+//! `std::io::Write`, and store arbitrary byte streams in the tree.
 //!
 //! ## Features
 //!
+//!  * Encrypt all on-disk data, and only decrypt on use
+//!  * Transparently handle hot/warm/cold storage tiers; currently S3-compatible backends are supported
+//!  * Versioned data structures allow you to save/load/fork application state safely
 //!  * Thread-safe by default
-//!  * Transparently handle hot/warm/cold storage tiers; currently S3-compatible backends is supported
-//!  * Versioned data structures that can be queried using the `Iterator` trait without loading in full
-//!  * Encrypt all on-disk data, and only decrypt it on use
-//!  * Focus on performance and control over memory use
+//!  * Iterate over random segments of data without loading to memory in full
+//!  * Focus on performance and fine-grained control of memory use
 //!  * Extensible for custom data types, storage backends, and serialization
 //!
 //! ## Example use
@@ -44,53 +64,34 @@
 //!
 //! ## Core concepts
 //!
-//! [`Infinitree`] is a versioned data store interface that is the
-//! first point of contact with the library. It provides convenience
-//! functions to work on different versions of the database index, and
-//! access random access data using pointers.
+//! [`Infinitree`] provides is the first entry point to the
+//! library. It creates, saves, and queries various versions of your
+//! [`Index`].
 //!
 //! There are 2 types of interactions with an infinitree: one that's
-//! happening through an index, and one that's directly exposing
-//! random access data.
+//! happening through an [`Index`], and one that's directly accessing
+//! the [`object`] structure.
 //!
-//! Any data stored outside of an index will receive a `ChunkPointer`,
+//! Any data stored in infinitree objects will receive a `ChunkPointer`,
 //! which _must_ be stored somewhere to retrieve the data. Hence the
 //! need for an index.
 //!
-//! Indexes can be any struct that implement the [`Index`]
+//! An index can be any struct that implements the [`Index`]
 //! trait. There's also a helpful [derive macro](derive@Index) that
 //! helps you do this. An index will consist of various fields, which
 //! act like regular old Rust types, but need to implement a few
 //! traits to help serialization.
 //!
-//! ### Infinitree
-//!
-//! [`Infinitree`] provides high-level versioning, querying, and key
-//! and memory management operations for working with the different
-//! [`fields`] in the [`Index`].
-//!
-//! An Infinitree instance is mainly acting as a context for all
-//! operations on the tree, and will be your first entry point when
-//! working with trees and persisting them.
-//!
-//! Here you can select different versions for the index to interact
-//! with, and create new commits.
-//!
 //! ### Index
 //!
-//! You can think about your `Index` as a schema. Or really just the
-//! central struct definition for your data.
+//! You can think about your `Index` as a schema. Or just application
+//! state on steroids.
 //!
 //! In a more abstract sense, the [`Index`] trait and corresponding
 //! [derive macro](derive@Index) represent a view into a single
 //! version of your database. Using an [`Infinitree`] you can swap
-//! between the various versions and mix-and-match data from various
-//! versions into a single `Index` instance.
-//!
-//! Interaction with `Index` member fields is straightforward. The
-//! [derive macro](derive@Index) will generate functions that produce
-//! an [`Intent`] for any operation that touches the persistence
-//! layer, such as [`Store`] and [`Load`].
+//! between, and mix-and-match data from, various versions of an
+//! `Index` state.
 //!
 //! ### Fields
 //!
@@ -100,41 +101,39 @@
 //!
 //! You can use any type that implements [`serde::Serialize`] as a
 //! field through the `fields::Serialized` wrapper type, but there are
-//! incremental hash map and list-like types available for you to use
-//! to track and only save changes between versions of your data.
+//! [incremental hash map][fields::VersionedMap] and
+//! [list-like][fields::LinkedList] types available for you to use to
+//! track and only save changes between versions of your data.
 //!
-//! Persisting and loading fields is done using an [`Intent`]
-//! wrapper. If you use the [`Index`][derive@Index] macro, this will
-//! automatically create accessor functions for each field in an
-//! index, that return an `Intent` wrapped strategy.
+//! Persisting and loading fields is done using an [`Intent`].  If you
+//! use the [`Index`][derive@Index] macro, it will automatically
+//! create accessor functions for each field in an index, and return
+//! an `Intent` wrapped strategy.
 //!
 //! Intents elide the specific types of the field and allow doing
 //! batch operations, e.g. when calling [`Infinitree::commit`] using a
-//! different strategy for each field in an `Index`.
+//! different strategy for each field in an index.
 //!
 //! ### Strategy
 //!
 //! To tell Infinitree how to serialize a field, you can use different
-//! strategies. A strategy has full control over the field and the
-//! serializers/loader transactions for it, which means you can
-//! control the placement of pieces of data.
+//! strategies. A [`Strategy`] has full control over how a data structure
+//! is serialized in the object system.
 //!
-//! Every strategy receives an `Index` transaction, and a
+//! Every strategy receives an `Index` transaction, and an
 //! [`object::Reader`] or [`object::Writer`]. It is the responsibility
 //! of the strategy to store [references](ChunkPointer) so you can
 //! load back the data once persisted.
 //!
 //! There are 2 strategies in the base library:
 //!
-//!  * [`LocalField`]: Store all of the data in the index. This is the
-//!  default.
-//!  * [`SparseField`]: Store values in a Map outside of the
-//!  index. Best suited for large structs as values.
+//!  * [`LocalField`]: Serialize all data in a single stream.
+//!  * [`SparseField`]: Serialize keys and values of a Map in separate
+//!  streams. Useful for quickly iterating over key indexes when
+//!  querying. Currently only supports values smaller than 4MB.
 //!
 //! Deciding which strategy is best for your use case may mean you
-//! have to run some experiments and benchmarks. A `SparseField` is
-//! generally useful for indexing large structs that you want to query
-//! rather than load all at once.
+//! have to run some experiments and benchmarks.
 //!
 //! See the documentation for the [`Index`][derive@Index] macro to see how to
 //! use strategies.
@@ -145,6 +144,13 @@
 //! [`Store`]: fields::Store
 //! [`LocalField`]: fields::LocalField
 //! [`SparseField`]: fields::SparseField
+//!
+//! ## Cryptographic design
+//!
+//! To read more about how the object system keeps your data safe,
+//! please look at
+//! [DESIGN.md](https://github.com/symmetree-labs/infinitree/blob/main/DESIGN.md)
+//! file in the main repository.
 
 #![deny(
     arithmetic_overflow,

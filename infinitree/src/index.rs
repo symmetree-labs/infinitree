@@ -93,8 +93,6 @@ pub trait Index: Send + Sync {
 }
 
 /// Allows serializing individual records of an infinite collection.
-///
-/// Implemented by a [`writer::Transaction`]. There's no need to implement this yourself.
 pub trait FieldWriter: Send {
     /// Write the next `obj` into the index
     fn write_next(&mut self, obj: impl Serialize + Send);
@@ -110,8 +108,6 @@ where
 }
 
 /// Allows deserializing an infinite collection by reading records one by one.
-///
-/// Implemented by a [`reader::Transaction`]. There's no need to implement this yourself.
 pub trait FieldReader: Send {
     /// Read the next available record from storage.
     fn read_next<T: DeserializeOwned>(&mut self) -> anyhow::Result<T>;
