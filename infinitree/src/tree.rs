@@ -156,7 +156,10 @@ where
     /// let message = "this is a string".to_string();
     /// tree.commit(message);
     /// ```
-    pub fn commit(&mut self, message: impl Into<Message>) -> Result<()> {
+    pub fn commit(
+        &mut self,
+        message: impl Into<Message>,
+    ) -> Result<Option<Arc<Commit<CustomData>>>> {
         let metadata = CommitMetadata {
             time: SystemTime::now(),
             message: message.into().into(),
@@ -193,7 +196,7 @@ where
     }
 
     /// Return all generations in the tree.
-    pub fn commit_list(&self) -> impl Deref<Target = Vec<Commit<CustomData>>> + '_ {
+    pub fn commit_list(&self) -> impl Deref<Target = CommitList<CustomData>> + '_ {
         self.root.commit_list.read()
     }
 
@@ -212,7 +215,7 @@ where
         message: impl Into<Message>,
         mode: CommitMode,
         custom_data: CustomData,
-    ) -> Result<()> {
+    ) -> Result<Option<Arc<Commit<CustomData>>>> {
         let metadata = CommitMetadata {
             time: SystemTime::now(),
             message: message.into().into(),
@@ -230,7 +233,7 @@ where
         &mut self,
         metadata: CommitMetadata<CustomData>,
         mode: CommitMode,
-    ) -> Result<()> {
+    ) -> Result<Option<Arc<Commit<CustomData>>>> {
         let mut object = self.object_writer()?;
         let mut sink = BufferedSink::new(self.object_writer()?);
 
@@ -242,11 +245,9 @@ where
 
         if let CommitMode::OnlyOnChange = mode {
             if changeset.iter().all(|(_, stream)| stream.is_empty()) {
-                return Ok(());
+                return Ok(self.last_commit());
             }
         }
-
-        self.root.commit_list.write().push(Commit { id, metadata });
 
         // scope for rewriting history. this is critical, the log is locked.
         {
@@ -256,6 +257,12 @@ where
 
             tr_log.extend(changeset.into_iter().map(|(field, oid)| (id, field, oid)));
             tr_log.extend(history);
+
+            // record the commit
+            self.root
+                .commit_list
+                .write()
+                .push(Commit { id, metadata }.into());
         }
 
         sealed_root::commit(
@@ -264,7 +271,12 @@ where
             self.backend.clone(),
             self.master_key.get_root_key()?,
         )?;
-        Ok(())
+
+        Ok(self.last_commit())
+    }
+
+    fn last_commit(&self) -> Option<Arc<Commit<CustomData>>> {
+        self.root.commit_list.read().last().cloned()
     }
 
     /// Load into memory all fields for the selected version ranges

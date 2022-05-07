@@ -1,4 +1,4 @@
-use super::{Commit, CommitId};
+use super::commit::*;
 use crate::{fields::Serialized, index::TransactionList};
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -17,7 +17,7 @@ where
     pub(crate) transaction_log: Serialized<TransactionList>,
 
     /// Chronologically ordered list of commits
-    pub(crate) commit_list: Serialized<Vec<Commit<CustomData>>>,
+    pub(crate) commit_list: Serialized<CommitList<CustomData>>,
 }
 
 impl<CustomData> Default for RootIndex<CustomData>

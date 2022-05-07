@@ -1,8 +1,10 @@
-use std::time::SystemTime;
-
 use crate::Digest;
 use serde::Serialize;
 use serde_with::serde_as;
+use std::{sync::Arc, time::SystemTime};
+
+/// The list of commits already recorded
+pub type CommitList<CustomData> = Vec<Arc<Commit<CustomData>>>;
 
 /// A representation of a generation within the tree
 pub type CommitId = Digest;
@@ -14,23 +16,33 @@ pub struct Commit<CustomData>
 where
     CustomData: Serialize,
 {
-    pub(super) id: CommitId,
-    pub(super) metadata: CommitMetadata<CustomData>,
+    /// Cryptographic hash of the commit contents
+    pub id: CommitId,
+
+    /// Metadata associated with the commit
+    pub metadata: CommitMetadata<CustomData>,
 }
 
-/// All the protected parts of a [`Commit`]
+/// Hashed metadata of a [`Commit`] that are included in its
+/// [`id`][Commit::id]
 #[serde_as]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CommitMetadata<CustomData>
 where
     CustomData: Serialize,
 {
-    pub(crate) previous: Option<CommitId>,
-    pub(crate) message: Option<String>,
-    #[serde_as(as = "serde_with::TimestampSecondsWithFrac<f64>")]
-    pub(crate) time: SystemTime,
+    /// Previous commit in the chain
+    pub previous: Option<CommitId>,
 
-    pub(crate) custom_data: CustomData,
+    /// Any additional stringy message, just like in Git
+    pub message: Option<String>,
+
+    /// Time the commit was made
+    #[serde_as(as = "serde_with::TimestampSecondsWithFrac<f64>")]
+    pub time: SystemTime,
+
+    /// Any machine-readable data you may need to store
+    pub custom_data: CustomData,
 }
 
 impl<CustomData: Serialize + Default> Default for CommitMetadata<CustomData> {
@@ -45,15 +57,17 @@ impl<CustomData: Serialize + Default> Default for CommitMetadata<CustomData> {
 }
 
 /// Enum to navigate the versions that are available in an Infinitree
-#[allow(unused)]
 pub enum CommitFilter {
     /// On querying, all versions will be crawled. This is the
     /// default.
     All,
+
     /// Only a single generation will be looked at during querying.
     Single(CommitId),
+
     /// All generations up to and including the given one will be queried.
     UpTo(CommitId),
+
     /// Only use generations between the two given versions.
     /// The first parameter **must** be earlier generation than the
     /// second.
