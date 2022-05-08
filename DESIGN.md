@@ -2,13 +2,16 @@
 
 ## Wat dis
 
-Infinitree is a deduplicated, encrypted data store that provides native
+Infinitree is a deduplicated, encrypted database that provides native
 versioning capabilities, and was designed to secure all metadata
-related to the files, including the exact size of the data that is
-stored in the containers.
+related to the data, including the exact size.
 
 ## Use cases
 
+ * Securely and efficiently record application state
+ * Store application secrets on untrusted storage (e.g. to be used in Kubernetes)
+ * Fast single-writer databases for arbitrary data shapes
+ * Transparently query multiple cache layers: in-memory, disk, remote storage
  * Versioned backups in the cloud, or external hard drives
  * Encrypt and store entire workspaces for fast sync between computer
  * Easily sync & wipe data & encryption programs while travelling
@@ -29,84 +32,64 @@ Infinitree considers the following things to be part of the threat model:
 ## Design
 
 Infinitree is designed to be portable and easy to implement in various
-programming languages and operating systems. It aims to be fast and
-correct, over providing more complex features at the cost of
-complexity.
+programming languages and operating systems. It prefers to be fast and
+correct over providing more complex features.
 
-Infinitree organizes user data into *stashes*. Stashes are the root of
-trust for all objects referenced and stored by them, including keying
-information. The encryption key for stash can be derived directly from
-the user passphrase using Argon2.
+Infinitree organizes user data into *trees*. The root of trust for a
+tree is a master key. The master key for a tree can be derived
+directly from the user passphrase using Argon2.
 
-Data is stored in uniform *objects*, with a hard-coded size of
+Data is stored in uniform *objects* with a hard-coded size of
 4MB. This is to mask the exact size of the data.  An *object id* is 32
-bytes of random represented in base32.  Objects are padded with random
+bytes of random, represented in base32.  Objects are padded with random
 bytes when they are not fully utilised.
 
-Infinitree distinguishes 2 types of objects, with differing internal
-structure:
+Infinitree distinguishes 2 types of objects, with slightly differing
+internal structure:
 
  * Index objects
  * Storage objects
  
 Parallelism is important for speed, and objects and their data are
-optimised for parallel access. Unlike most similar programs, Infinitree
-can't rely on the filesystem to do the synchronization of file
-operations, therefore much of it needs to happen in application logic.
+optimised for parallel, random access.
 
-### Index objects
+### Encrypting data chunks
 
-Index objects (or metadata object, mobject) are general purpose stores
-which are encrypted as a whole.
+A storage object is a series of *chunks* that are individually LZ4
+compressed, then encrypted using a symmetric ChaCha20-Poly1305 AED
+construction.
 
-A mobject stores several *records* that may contain arbitrary
-serialized of data. Following a 512-byte header (padded with 0), a
-mobject stores records as LZ4 streams with 64k block size, with
-records aligned to multiples of 64k.
+In order to extract chunks from objects, the following needs to be known:
 
-The header contains a list of records and their offset from the start
-of the file, serialized using msgpack. The 512-byte header limits the 
-number of records a mobject can contain, which looks like a reasonable
-tradeoff at this time. In the future, the header can be extended in a
-backwards compatible way.
-
-This is what a metadata object looks like:
-
-| Offset         | Content                               |
-| ------         | -------                               |
-| 0              | msgpack-encoded header                   |
-| `512`          | `LZ4_stream(field 1)`                 |
-| `512 + 64k`    | `... LZ4_stream(field 1) + 0 padding` |
-| `512 + 128k`   | `LZ4_stream(field 2)`                 |
-| `512 + 192k`   | `LZ4_stream(field 2)`                 |
-| `512 + 256k`   | `LZ4_stream(field 2)`                 |
-| `... 4M - 64k` | `... LZ4(field N) + random padding`   |
-
-Mobjects are currently used to store all indexing information for data
-objects, as well as internal state for more efficient operation.
-
-The recognised fields currently are:
-
- * File list
- * Chunk list
+ * object id
+ * start offset
+ * compressed chunk size
+ * Blake3 hash of plaintext
  
-Access to different fields can be parallelised through `mmap`-ing
-mobjects, however, the exact length of a field without padding is
-_not_ stored. It is expected that the LZ4 stream is terminated
-using the correct framing provided by `liblz4`.
+The ChaCha20-Poly1305 is parameterized as such:
 
-Metadata objects are encrypted using ChaCha20-Poly1305 and a subkey
-derived from the user passphrase. The root object id of a stash is
-also derived from the same passphrase.
+    size:     4 bytes = size_of(data)
+    
+    key:     32 bytes = <index key | storage key>
+    
+    hash:    32 bytes = blake3(data)
+    
+    aead_key: 32 bytes = key XOR hash
+    
+    nonce: 32 bytes = (object_id[:4] XOR size) ++ object_id[4:]
+    	
+	cyphertext, tag = chacha_poly(aead_key, nonce, data, aad = none)
+	
+This parameterization allows for [convergent encryption][convergent_enc].
+
+Such a construct also means that compromise of `key` in itself does
+not necessarily result in full data compromise without access to the
+metadata.
 
 ### Storage objects
 
-A storage object (or data object, dobject) is a series of *chunks*
-that are individually LZ4 compressed, then encrypted using a symmetric
-ChaCha20-Poly1305 AED construction.
-
-Dobjects are tightly packed, and padded at the end of the file
-with random bytes.
+Storage objects are tightly packed with chunks, and padded at the end
+of the file with random bytes.
 
 ```
 | ChaCha-Poly(LZ4(chunk 1)) | ChaCha-Poly(LZ4(chunk 2)) |
@@ -115,27 +98,75 @@ with random bytes.
 | ChaCha-Poly(LZ4(chunk 4)) | random padding            | 
 ```
 
-In order to extract chunks from dobjects, the following needs to be known:
 
- * object id
- * start offset
- * compressed chunk size
- * Blake2s hash of plaintext
+To encrypt chunks in storage objects, a *storage key* is derived as a
+subkey of the *master key* using the Blake 3 [key derivation
+function][blake3_key_derive].
 
-The key to encrypt each chunk is `Blake2s(plaintext) XOR Argon2(user
-key)`, therefore compromising a user key in itself does not necessarily
-result in full data compromise without access to indexing metadata.
+### Index objects
 
-## Key management
+The *root object ID* is derived from the master key using the Blake 3
+[key derivation function][blake3_key_derive].
 
-The user passphrase is the root of trust for a stash. The raw key
-material is derived from the user passphrase using Argon2.
+Index objects behave in every way the same as storage objects, with 2
+differences:
 
-To separate the keys used to derive the root object id, encrypt
-metadata, and encrypt data, 3 separate subkeys are derived using
-libsodium's [key
-derivation](https://libsodium.gitbook.io/doc/key_derivation) APIs,
-which uses Blake2 under the hood.
+ * A separate *index key* is derived from the *master key*
+ * The first 512 bytes of these objects are reserved for a header or
+   filled with random
+
+Root object:
+
+```
+| 512 bytes: ChaCha-Poly(LZ4(root pointer + random)) + tag |
+| ChaCha-Poly(LZ4(chunk 1)) | ChaCha-Poly(LZ4(chunk 2))    |
+|               ChaCha-Poly(LZ4(chunk 3))                  | 
+|           ... ChaCha-Poly(LZ4(chunk 3))                  | 
+| ChaCha-Poly(LZ4(chunk 4)) | random padding               | 
+```
+
+Index object:
+
+```
+| 512 bytes: random                                        |
+| ChaCha-Poly(LZ4(chunk 1)) | ChaCha-Poly(LZ4(chunk 2))    |
+|               ChaCha-Poly(LZ4(chunk 3))                  | 
+|           ... ChaCha-Poly(LZ4(chunk 3))                  | 
+| ChaCha-Poly(LZ4(chunk 4)) | random padding               | 
+```
+
+**Note:** it is not strictly a requirement for index objects to reserve
+and fill the header with random. This is currently an implementation detail.
+
+#### Header
+
+The header contains the following 512 byte structure:
+
+```
+ChaCha-Poly(
+
+offset: Network Endian 4 bytes: u32
+size: Network Endian 4 bytes: u32
+object_id: 32 bytes
+hash: 32 bytes
+tag: 16 bytes
+random: 512 - 88 - 16 bytes = 408
+
+)
+
+tag: 16 bytes 
+```
+
+The header is decrypted or encrypted with the following parameters,
+using the [standard chunk encryption method](#encrypting-data-chunks),
+setting the `hash` to a 32 bytes of 0.
+
+Since `hash` is only used as a transformation on the `key` to allow
+convergent encryption, this use is safe and does not result in
+weakening of security properties.
+
+The data chunk that the header points to can allow bootstrapping and
+deserialization of more complex structures, depending on the use case.
 
 ## Threat model
 
@@ -210,3 +241,6 @@ storage.
 One aim is to require no installation or modification to an existing
 operating system, although an installation package could provide
 platform-specific integration for better user experience.
+
+[blake3_key_derive]: https://docs.rs/blake3/latest/blake3/fn.derive_key.html
+[convergent_enc]: https://en.wikipedia.org/wiki/Convergent_encryption
