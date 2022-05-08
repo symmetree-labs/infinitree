@@ -128,6 +128,7 @@ impl<T: 'static> LinkedList<T> {
     /// ```
     pub fn push(&self, value: impl Into<Arc<T>>) {
         let node = SCCArc::new(Node(AtomicArc::default(), value.into()));
+        let barrier = Barrier::new();
 
         let _ = self
             .inner
@@ -137,6 +138,7 @@ impl<T: 'static> LinkedList<T> {
                 (Some(node.clone()), Tag::None),
                 Ordering::SeqCst,
                 Ordering::Relaxed,
+                &barrier,
             )
             .and_then(|_| {
                 self.inner.first.compare_exchange(
@@ -144,6 +146,7 @@ impl<T: 'static> LinkedList<T> {
                     (Some(node.clone()), Tag::None),
                     Ordering::SeqCst,
                     Ordering::Relaxed,
+                    &barrier,
                 )
             });
 
