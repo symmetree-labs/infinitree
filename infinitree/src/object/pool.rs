@@ -1,6 +1,7 @@
 use super::{ObjectError, Result};
 use flume as mpsc;
 use std::{
+    num::NonZeroUsize,
     ops::{Deref, DerefMut},
     sync::Arc,
 };
@@ -12,7 +13,7 @@ pub(crate) mod writer;
 pub struct Pool<O> {
     enqueue: mpsc::Sender<O>,
     dequeue: mpsc::Receiver<O>,
-    items: usize,
+    count: usize,
     constructor: Option<Arc<dyn Fn() -> O + Send + Sync>>,
 }
 
@@ -21,17 +22,18 @@ impl<O> Clone for Pool<O> {
         Self {
             enqueue: self.enqueue.clone(),
             dequeue: self.dequeue.clone(),
-            items: self.items,
+            count: self.count,
             constructor: self.constructor.clone(),
         }
     }
 }
 
 impl<O: 'static + Clone> Pool<O> {
-    pub fn new(items: usize, instance: O) -> Result<Self> {
-        let (enqueue, dequeue) = mpsc::bounded(items);
+    pub fn new(items: NonZeroUsize, instance: O) -> Result<Self> {
+        let count = items.get();
+        let (enqueue, dequeue) = mpsc::bounded(count);
 
-        for _ in 0..(items - 1) {
+        for _ in 0..(count - 1) {
             enqueue
                 .send(instance.clone())
                 .map_err(|_| ObjectError::Fatal)?;
@@ -41,7 +43,7 @@ impl<O: 'static + Clone> Pool<O> {
         Ok(Self {
             enqueue,
             dequeue,
-            items,
+            count,
             constructor: None,
         })
     }
@@ -49,25 +51,25 @@ impl<O: 'static + Clone> Pool<O> {
 
 impl<O: 'static> Pool<O> {
     pub fn with_constructor(
-        items: usize,
+        count: usize,
         constructor: impl Fn() -> O + Send + Sync + 'static,
     ) -> Self {
-        let (enqueue, dequeue) = mpsc::bounded(items);
+        let (enqueue, dequeue) = mpsc::bounded(count);
 
-        for _ in 0..items {
+        for _ in 0..count {
             enqueue.send(constructor()).unwrap();
         }
 
         Self {
             enqueue,
             dequeue,
-            items,
+            count,
             constructor: Some(Arc::new(constructor)),
         }
     }
 
     pub fn lease(&self) -> Result<PoolRef<O>> {
-        if self.items == 0 {
+        if self.count == 0 {
             Ok(PoolRef {
                 instance: Some(self.constructor.as_ref().unwrap()()),
                 enqueue: None,
@@ -82,7 +84,7 @@ impl<O: 'static> Pool<O> {
     }
 
     pub fn count(&self) -> usize {
-        self.items
+        self.count
     }
 }
 

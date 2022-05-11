@@ -11,7 +11,7 @@ use crate::{
     tree::RootIndex,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use std::{io, mem::size_of, sync::Arc};
+use std::{io, mem::size_of, num::NonZeroUsize, sync::Arc};
 
 // Header size max 512b
 const HEADER_SIZE: usize = 512;
@@ -100,7 +100,7 @@ where
     CustomData: Serialize + DeserializeOwned + Send + Sync + 'static,
 {
     let mut writer = Pool::new(
-        1,
+        NonZeroUsize::new(1).unwrap(),
         AEADWriter::for_root(
             backend,
             crypto.clone(),
