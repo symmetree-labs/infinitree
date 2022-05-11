@@ -16,6 +16,15 @@ enum Mode {
     Data,
 }
 
+impl Mode {
+    fn skip(&self) -> u64 {
+        match self {
+            Self::SealRoot(skip) => *skip,
+            Self::Data => 0,
+        }
+    }
+}
+
 pub trait Writer: Send {
     fn write_chunk(&mut self, hash: &Digest, data: &[u8]) -> Result<ChunkPointer>;
     fn flush(&mut self) -> Result<()>;
@@ -71,10 +80,7 @@ impl AEADWriter {
 
         self.rewrite.clear();
         self.object.reset_id(&self.crypto);
-        self.object.seek(match self.mode {
-            Mode::SealRoot(header) => SeekFrom::Start(header),
-            Mode::Data => SeekFrom::Start(0),
-        })?;
+        self.object.seek(SeekFrom::Start(self.mode.skip()))?;
 
         Ok(())
     }
@@ -97,7 +103,7 @@ impl Clone for AEADWriter {
 
 impl Drop for AEADWriter {
     fn drop(&mut self) {
-        if self.object.position() > 0 {
+        if self.object.position() > self.mode.skip() as usize {
             self.flush().unwrap();
         }
     }
@@ -155,10 +161,7 @@ impl Writer for AEADWriter {
 
         reset_id(&mut self.object, &self.crypto, &mut self.rewrite);
 
-        self.object.seek(match self.mode {
-            Mode::SealRoot(header) => SeekFrom::Start(header),
-            Mode::Data => SeekFrom::Start(0),
-        })?;
+        self.object.seek(SeekFrom::Start(self.mode.skip()))?;
 
         Ok(())
     }
