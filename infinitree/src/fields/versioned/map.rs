@@ -298,18 +298,18 @@ where
         // if you have a good idea how to avoid
         // using a macro and just do this, please send a PR
 
+        self.current.for_each(|k, v: &mut Action<V>| {
+            if let Some(value) = v {
+                if !(callback)(k, Arc::as_ref(value)) {
+                    *v = Action::None
+                }
+            }
+        });
         self.base.for_each(|k, v: &mut Action<V>| {
             if let Some(value) = v {
                 if !(callback)(k, Arc::as_ref(value)) {
                     self.current
                         .upsert(k.clone(), || Action::None, |_, v| *v = Action::None)
-                }
-            }
-        });
-        self.current.for_each(|k, v: &mut Action<V>| {
-            if let Some(value) = v {
-                if !(callback)(k, Arc::as_ref(value)) {
-                    *v = Action::None
                 }
             }
         });
@@ -503,9 +503,7 @@ where
         // therefore:
         // 1. do not insert a key if it already exists
         // 2. do not restore a removed key
-        if let value @ Some(..) = record.1 {
-            let _ = self.field.base.insert(record.0, value);
-        }
+        let _ = self.field.base.insert(record.0, record.1);
     }
 }
 
@@ -569,9 +567,7 @@ where
         // therefore:
         // 1. do not insert a key if it already exists
         // 2. do not restore a removed key
-        if let value @ Some(..) = record.1 {
-            let _ = self.field.base.insert(record.0, value);
-        }
+        let _ = self.field.base.insert(record.0, record.1);
     }
 }
 
