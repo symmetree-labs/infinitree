@@ -70,27 +70,26 @@ where
         })
     };
 
-    let transaction_list = {
+    let (objects, transaction_list) = {
         let object = backend.read_object(&root)?;
         let stream_ptr =
             parse_transactions_stream(root, crypto, object.as_inner(), &mut buffer, pool.lease()?)?;
+        let stream_objects = stream_ptr.objects();
 
         let mut stream = DeserializeStream::new(stream_ptr.open_with_buffer(pool.lease()?, buffer));
-        stream.read_next::<TransactionList>()?
+
+        (stream_objects, stream.read_next::<TransactionList>()?)
     };
 
-    let mut root = RootIndex::default();
+    let mut root = RootIndex::<CustomData> {
+        objects,
+        ..Default::default()
+    };
     root.load_all_from(&transaction_list, &pool)?;
 
     Ok(root)
 }
 
-// FIXME: this is gonna thrash pretty badly when the root index gets >1 block
-//
-// In theory we should at least attempt to _rewrite_ the existing
-// objects, so no objects will be left unlinked.
-//
-// In an ideal world, we would garbage collect simultaneously here.
 pub(crate) fn commit<CustomData>(
     index: &mut RootIndex<CustomData>,
     root: ObjectId,
@@ -102,7 +101,12 @@ where
 {
     let mut writer = Pool::new(
         1,
-        AEADWriter::for_root(backend, crypto.clone(), HEADER_SIZE as u64),
+        AEADWriter::for_root(
+            backend,
+            crypto.clone(),
+            HEADER_SIZE as u64,
+            std::mem::take(&mut index.objects),
+        ),
     )?;
 
     let stream = {
@@ -117,6 +121,8 @@ where
         crate::serialize_to_writer(&mut sink, &transactions)?;
         sink.clear()?
     };
+
+    index.objects = stream.objects();
 
     let stream_buf = crate::serialize_to_vec(&stream)?;
     let mut head: [u8; HEADER_SIZE] = writer

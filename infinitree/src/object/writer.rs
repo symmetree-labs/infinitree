@@ -2,7 +2,7 @@ use super::{ObjectError, ObjectId, Result, WriteObject};
 use crate::{
     backends::Backend,
     compress,
-    crypto::{ChunkKey, CryptoProvider, Digest, RootKey},
+    crypto::{ChunkKey, CryptoProvider, Digest, Random, RootKey},
     ChunkPointer,
 };
 use std::{
@@ -26,6 +26,7 @@ pub struct AEADWriter {
     crypto: ChunkKey,
     object: WriteObject,
     mode: Mode,
+    rewrite: Vec<ObjectId>,
 }
 
 impl AEADWriter {
@@ -38,18 +39,26 @@ impl AEADWriter {
             crypto,
             object,
             mode: Mode::Data,
+            rewrite: vec![],
         }
     }
 
-    pub fn for_root(backend: Arc<dyn Backend>, crypto: RootKey, header_size: u64) -> Self {
+    pub fn for_root(
+        backend: Arc<dyn Backend>,
+        crypto: RootKey,
+        header_size: u64,
+        mut rewrite: Vec<ObjectId>,
+    ) -> Self {
         let mut object = WriteObject::default();
-        object.reset_id(&crypto);
         object.seek(SeekFrom::Start(header_size)).unwrap();
+
+        reset_id(&mut object, &crypto, &mut rewrite);
 
         AEADWriter {
             backend,
             crypto,
             object,
+            rewrite,
             mode: Mode::SealRoot(header_size),
         }
     }
@@ -60,6 +69,7 @@ impl AEADWriter {
         self.object.finalize(&self.crypto);
         self.backend.write_object(&self.object)?;
 
+        self.rewrite.clear();
         self.object.reset_id(&self.crypto);
         self.object.seek(match self.mode {
             Mode::SealRoot(header) => SeekFrom::Start(header),
@@ -73,13 +83,14 @@ impl AEADWriter {
 impl Clone for AEADWriter {
     fn clone(&self) -> Self {
         let mut object = self.object.clone();
-        object.set_id(ObjectId::new(&self.crypto));
+        object.reset_id(&self.crypto);
 
         AEADWriter {
             object,
             backend: self.backend.clone(),
             crypto: self.crypto.clone(),
             mode: self.mode.clone(),
+            rewrite: vec![],
         }
     }
 }
@@ -142,7 +153,8 @@ impl Writer for AEADWriter {
         self.object.finalize(&self.crypto);
         self.backend.write_object(&self.object)?;
 
-        self.object.reset_id(&self.crypto);
+        reset_id(&mut self.object, &self.crypto, &mut self.rewrite);
+
         self.object.seek(match self.mode {
             Mode::SealRoot(header) => SeekFrom::Start(header),
             Mode::Data => SeekFrom::Start(0),
@@ -150,4 +162,9 @@ impl Writer for AEADWriter {
 
         Ok(())
     }
+}
+
+#[inline(always)]
+fn reset_id(object: &mut WriteObject, random: &impl Random, rewrite: &mut Vec<ObjectId>) {
+    object.set_id(rewrite.pop().unwrap_or_else(|| ObjectId::new(random)));
 }

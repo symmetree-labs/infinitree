@@ -1,5 +1,5 @@
 use super::commit::*;
-use crate::{fields::Serialized, index::TransactionList};
+use crate::{fields::Serialized, index::TransactionList, ObjectId};
 use serde::{de::DeserializeOwned, Serialize};
 
 /// The root index of the tree that stores version information
@@ -18,6 +18,12 @@ where
 
     /// Chronologically ordered list of commits
     pub(crate) commit_list: Serialized<CommitList<CustomData>>,
+
+    /// Stores the list of objects that contain the index.  To make
+    /// storage use more efficient, on commit these are going to be
+    /// rewritten first, but only with index data.
+    #[infinitree(skip)]
+    pub(crate) objects: Vec<ObjectId>,
 }
 
 impl<CustomData> Default for RootIndex<CustomData>
@@ -28,6 +34,7 @@ where
         Self {
             transaction_log: Serialized::default(),
             commit_list: Serialized::default(),
+            objects: vec![],
         }
     }
 }

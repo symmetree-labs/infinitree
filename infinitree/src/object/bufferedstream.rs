@@ -1,5 +1,5 @@
 use super::{AEADReader, BlockBuffer, PoolRef, Reader, Writer};
-use crate::chunks::ChunkPointer;
+use crate::{chunks::ChunkPointer, ObjectId};
 use std::io::{self, Read, Write};
 
 /// Smaller chunks will lower the storage overhead, achieving lowerhead.
@@ -41,8 +41,23 @@ impl Stream {
         }
     }
 
+    /// Returns true if the stream has data in it.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// List of objects that the Stream spans.
+    ///
+    /// Note these may not _exclusively_ contain this particular
+    /// stream, or even just streams.
+    pub fn objects(&self) -> Vec<ObjectId> {
+        let mut objects = self
+            .0
+            .iter()
+            .map(|p| *p.object_id())
+            .collect::<std::collections::HashSet<_>>();
+
+        objects.drain().collect()
     }
 }
 
