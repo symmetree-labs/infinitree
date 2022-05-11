@@ -11,7 +11,12 @@ use crate::{
     tree::RootIndex,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use std::{io, mem::size_of, num::NonZeroUsize, sync::Arc};
+use std::{
+    io,
+    mem::{size_of, take},
+    num::NonZeroUsize,
+    sync::Arc,
+};
 
 // Header size max 512b
 const HEADER_SIZE: usize = 512;
@@ -82,7 +87,7 @@ where
     };
 
     let mut root = RootIndex::<CustomData> {
-        objects,
+        objects: objects.into(),
         ..Default::default()
     };
     root.load_all_from(&transaction_list, &pool)?;
@@ -105,7 +110,7 @@ where
             backend,
             crypto.clone(),
             HEADER_SIZE as u64,
-            std::mem::take(&mut index.objects),
+            take(&mut index.objects.write()),
         ),
     )?;
 
@@ -122,7 +127,7 @@ where
         sink.clear()?
     };
 
-    index.objects = stream.objects();
+    *index.objects.write() = stream.objects();
 
     let stream_buf = crate::serialize_to_vec(&stream)?;
     let mut head: [u8; HEADER_SIZE] = writer

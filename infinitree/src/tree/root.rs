@@ -23,7 +23,7 @@ where
     /// storage use more efficient, on commit these are going to be
     /// rewritten first, but only with index data.
     #[infinitree(skip)]
-    pub(crate) objects: Vec<ObjectId>,
+    pub(crate) objects: Serialized<Vec<ObjectId>>,
 }
 
 impl<CustomData> Default for RootIndex<CustomData>
@@ -34,7 +34,7 @@ where
         Self {
             transaction_log: Serialized::default(),
             commit_list: Serialized::default(),
-            objects: vec![],
+            objects: Serialized::default(),
         }
     }
 }
