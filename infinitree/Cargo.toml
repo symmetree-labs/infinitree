@@ -2,7 +2,7 @@
 name = "infinitree"
 authors = ["Peter Parkanyi <p@symmetree.dev>"]
 description = "Embedded, encrypted database with tiered cache"
-version = "0.6.0"
+version = "0.7.0"
 keywords = ["crypto", "database", "cache", "sqlite", "rocksdb"]
 categories = ["database-implementations", "concurrency", "data-structures", "algorithms", "caching"]
 homepage = "https://symmetree.dev"
@@ -46,7 +46,7 @@ rmp-serde = "1.1.0"
 secrecy = "0.8"
 zeroize = "^1"
 
-infinitree-macros = { version = "0.6.0", path = "../infinitree-macros" }
+infinitree-macros = { version = "0.7.0", path = "../infinitree-macros" }
 
 rust-s3 = { version="0.31.0", default_features = false, features = ["with-tokio"], optional = true }
 tokio = { version = "^1", features = ["rt", "macros", "rt-multi-thread", "parking_lot"], optional = true }
