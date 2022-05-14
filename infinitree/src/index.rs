@@ -164,7 +164,7 @@ pub(crate) trait IndexExt: Index {
         hashed_data.extend(crate::serialize_to_vec(&log)?);
 
         let version = crate::crypto::secure_hash(&hashed_data);
-        Ok((version, log))
+        Ok((CommitId::from_bytes(version), log))
     }
 
     fn store<W: Writer + Send + Sync>(
@@ -248,7 +248,7 @@ pub(crate) mod test {
         Load::load(
             &mut load,
             Pool::with_constructor(0, reader),
-            vec![(Digest::default(), "field name".into(), object)],
+            vec![(CommitId::default(), "field name".into(), object)],
         );
     }
 

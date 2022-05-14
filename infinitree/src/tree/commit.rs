@@ -1,4 +1,4 @@
-use crate::Digest;
+use crate::Id;
 use serde::Serialize;
 use serde_with::serde_as;
 use std::{sync::Arc, time::SystemTime};
@@ -7,7 +7,7 @@ use std::{sync::Arc, time::SystemTime};
 pub type CommitList<CustomData> = Vec<Arc<Commit<CustomData>>>;
 
 /// A representation of a generation within the tree
-pub type CommitId = Digest;
+pub type CommitId = Id;
 
 /// Identifies a cryptographically secured set of transactions on the tree.
 #[serde_as]

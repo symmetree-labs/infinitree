@@ -1,23 +1,21 @@
 use crate::crypto::{Digest, Random};
-
 pub use hex::FromHexError;
-
 use std::{convert::TryFrom, string::ToString};
 
 /// Unique identifier for a persistence object.
 #[derive(Default, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ObjectId(Digest);
+pub struct Id(Digest);
 
-impl ObjectId {
+impl Id {
     #[inline(always)]
-    pub fn new(random: &impl Random) -> ObjectId {
-        let mut id = ObjectId::default();
+    pub fn new(random: &impl Random) -> Id {
+        let mut id = Id::default();
         id.reset(random);
         id
     }
 
-    pub fn from_bytes(bytes: impl AsRef<[u8]>) -> ObjectId {
-        let mut id = ObjectId::default();
+    pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Id {
+        let mut id = Id::default();
         id.0.copy_from_slice(bytes.as_ref());
 
         id
@@ -29,14 +27,14 @@ impl ObjectId {
     }
 }
 
-impl AsRef<[u8]> for ObjectId {
+impl AsRef<[u8]> for Id {
     #[inline]
     fn as_ref(&self) -> &[u8] {
         &self.0
     }
 }
 
-impl TryFrom<&str> for ObjectId {
+impl TryFrom<&str> for Id {
     type Error = FromHexError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
@@ -44,14 +42,14 @@ impl TryFrom<&str> for ObjectId {
     }
 }
 
-impl ToString for ObjectId {
+impl ToString for Id {
     #[inline(always)]
     fn to_string(&self) -> String {
         hex::encode(self.0.as_ref())
     }
 }
 
-impl std::fmt::Debug for ObjectId {
+impl std::fmt::Debug for Id {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_string())
     }

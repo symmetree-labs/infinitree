@@ -24,8 +24,7 @@ pub use bufferedstream::*;
 
 pub mod serializer;
 
-mod id;
-pub use id::ObjectId;
+pub type ObjectId = crate::Id;
 
 #[derive(Error, Debug)]
 pub enum ObjectError {
