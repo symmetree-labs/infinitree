@@ -416,4 +416,19 @@ where
     pub fn backend(&self) -> Arc<dyn Backend> {
         self.backend.clone()
     }
+
+    /// Returns the number of index objects
+    pub fn index_object_count(&self) -> usize {
+        let root = self.root.objects.read();
+        let transactions = self.root.transaction_log.read();
+        root.iter()
+            .cloned()
+            .chain(
+                transactions
+                    .iter()
+                    .flat_map(|(_, _, stream)| stream.objects()),
+            )
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+    }
 }
