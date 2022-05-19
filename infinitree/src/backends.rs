@@ -8,7 +8,7 @@ pub use directory::Directory;
 #[cfg(feature = "s3")]
 mod s3;
 #[cfg(feature = "s3")]
-pub use self::s3::{InMemoryS3, Region};
+pub use self::s3::*;
 #[cfg(feature = "tokio")]
 mod cache;
 #[cfg(feature = "tokio")]

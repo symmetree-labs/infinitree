@@ -1,7 +1,7 @@
 use super::{Backend, BackendError, Result};
 use crate::object::{Object, ObjectId, ReadBuffer, ReadObject, WriteObject};
-pub use ::s3::Region;
-use ::s3::{creds::Credentials, Bucket};
+use ::s3::Bucket;
+pub use ::s3::{creds::Credentials, Region};
 use anyhow::Context;
 use scc::HashMap;
 use std::sync::Arc;
@@ -21,6 +21,14 @@ pub struct InMemoryS3 {
 impl InMemoryS3 {
     pub fn new(region: Region, bucket: impl AsRef<str>) -> Result<Self> {
         let creds = Credentials::default().context("Failed to get S3 credentials")?;
+        Self::with_credentials(region, bucket, creds)
+    }
+
+    pub fn with_credentials(
+        region: Region,
+        bucket: impl AsRef<str>,
+        creds: Credentials,
+    ) -> Result<Self> {
         let client = Bucket::new(bucket.as_ref(), region, creds)
             .context("Failed to connect to S3 bucket")?
             .with_path_style();
@@ -105,7 +113,7 @@ impl Backend for InMemoryS3 {
 #[cfg(test)]
 mod test {
     use crate::{
-        backends::{test::write_and_wait_for_commit, InMemoryS3, Region},
+        backends::{test::write_and_wait_for_commit, InMemoryS3},
         object::WriteObject,
         Backend, ObjectId, TEST_DATA_DIR,
     };
@@ -150,10 +158,7 @@ mod test {
         setup_s3_server(&addr);
 
         let backend = InMemoryS3::new(
-            Region::Custom {
-                region: "".into(),
-                endpoint: format!("http://{}", addr.to_string()),
-            },
+            format!("http://{}", addr.to_string()).parse().unwrap(),
             "bucket",
         )
         .unwrap();
