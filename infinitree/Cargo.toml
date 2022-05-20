@@ -15,9 +15,9 @@ readme="../README.md"
 [features]
 default = ["mmap", "s3", "native-tls"]
 mmap = ["memmap2"]
-s3 = ["futures", "tokio", "rust-s3"]
-rustls = ["rust-s3/tokio-rustls-tls"]
-native-tls = ["rust-s3/tokio-native-tls"]
+s3 = ["futures", "tokio", "rusty-s3"]
+rustls = ["reqwest/rustls-tls"]
+native-tls = ["reqwest/native-tls-alpn"]
 
 # internal use only
 _test = ["s3", "native-tls"]
@@ -48,7 +48,8 @@ zeroize = "^1"
 
 infinitree-macros = { version = "0.7.0", path = "../infinitree-macros" }
 
-rust-s3 = { version="0.31.0", default_features = false, features = ["with-tokio"], optional = true }
+rusty-s3 = { version = "0.3.0", optional = true }
+reqwest = { version = "0.11", default-features = false, optional = true }
 tokio = { version = "^1", features = ["rt", "macros", "rt-multi-thread", "parking_lot"], optional = true }
 futures = { version = "0.3", optional = true }
 
