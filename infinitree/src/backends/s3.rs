@@ -1,4 +1,4 @@
-use super::{Backend, BackendError, Result};
+use super::{Backend, Result};
 use crate::object::{Object, ObjectId, ReadBuffer, ReadObject, WriteObject};
 use ::s3::Bucket;
 pub use ::s3::{creds::Credentials, Region};
@@ -10,16 +10,16 @@ use tokio::{
     task::{self, JoinHandle},
 };
 
-type TaskHandle = JoinHandle<anyhow::Result<(Vec<u8>, u16)>>;
+type TaskHandle = JoinHandle<anyhow::Result<u16>>;
 
 #[derive(Clone)]
-pub struct InMemoryS3 {
+pub struct S3 {
     client: Bucket,
     in_flight: Arc<HashMap<ObjectId, Arc<Option<TaskHandle>>>>,
 }
 
-impl InMemoryS3 {
-    pub fn new(region: Region, bucket: impl AsRef<str>) -> Result<Self> {
+impl S3 {
+    pub fn new(region: Region, bucket: impl AsRef<str>) -> Result<Arc<Self>> {
         let creds = Credentials::default().context("Failed to get S3 credentials")?;
         Self::with_credentials(region, bucket, creds)
     }
@@ -28,7 +28,7 @@ impl InMemoryS3 {
         region: Region,
         bucket: impl AsRef<str>,
         creds: Credentials,
-    ) -> Result<Self> {
+    ) -> Result<Arc<Self>> {
         let client = Bucket::new(bucket.as_ref(), region, creds)
             .context("Failed to connect to S3 bucket")?
             .with_path_style();
@@ -36,11 +36,12 @@ impl InMemoryS3 {
         Ok(Self {
             client,
             in_flight: Arc::new(HashMap::default()),
-        })
+        }
+        .into())
     }
 }
 
-impl Backend for InMemoryS3 {
+impl Backend for S3 {
     fn write_object(&self, object: &WriteObject) -> Result<()> {
         let client = self.client.clone();
         let in_flight = self.in_flight.clone();
@@ -50,12 +51,10 @@ impl Backend for InMemoryS3 {
         let id = *object.id();
 
         let handle = Arc::new(Some(task::spawn(async move {
-            let handle = client
-                .put_object(key, &body)
-                .await
-                .context("Failed to write object");
+            let status_code = client.put_object_stream(&mut body.as_slice(), key).await?;
             in_flight.remove(&id);
-            handle
+
+            Ok(status_code)
         })));
 
         self.in_flight.upsert(
@@ -74,7 +73,7 @@ impl Backend for InMemoryS3 {
     }
 
     fn read_object(&self, id: &ObjectId) -> Result<Arc<ReadObject>> {
-        let object: std::result::Result<Vec<u8>, BackendError> = {
+        let object: Result<Vec<u8>> = {
             let client = self.client.clone();
             let key = id.to_string();
 
@@ -102,10 +101,15 @@ impl Backend for InMemoryS3 {
         });
 
         task::block_in_place(move || {
-            runtime::Handle::current().block_on(async move {
-                futures::future::join_all(handles.into_iter()).await;
-            })
-        });
+            runtime::Handle::current()
+                .block_on(async move { futures::future::join_all(handles.into_iter()).await })
+        })
+        .into_iter()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("Failed to upload objects")?
+        .into_iter()
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
         Ok(())
     }
 }
@@ -113,7 +117,7 @@ impl Backend for InMemoryS3 {
 #[cfg(test)]
 mod test {
     use crate::{
-        backends::{test::write_and_wait_for_commit, InMemoryS3},
+        backends::{test::write_and_wait_for_commit, S3},
         object::WriteObject,
         Backend, ObjectId, TEST_DATA_DIR,
     };
@@ -157,7 +161,7 @@ mod test {
         let addr = SocketAddr::from(BIND_SERVER);
         setup_s3_server(&addr);
 
-        let backend = InMemoryS3::new(
+        let backend = S3::new(
             format!("http://{}", addr.to_string()).parse().unwrap(),
             "bucket",
         )
@@ -166,10 +170,27 @@ mod test {
         let mut object = WriteObject::default();
         let id_2 = ObjectId::from_bytes(b"1234567890abcdef1234567890abcdef");
 
-        write_and_wait_for_commit(&backend, &object);
+        write_and_wait_for_commit(backend.as_ref(), &object);
         let _obj_1_read_ref = backend.read_object(object.id()).unwrap();
 
         object.set_id(id_2);
-        write_and_wait_for_commit(&backend, &object);
+        write_and_wait_for_commit(backend.as_ref(), &object);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[should_panic]
+    async fn s3_reading_nonexistent_object() {
+        let addr = SocketAddr::from(BIND_SERVER);
+        setup_s3_server(&addr);
+
+        let backend = S3::new(
+            format!("http://{}", addr.to_string()).parse().unwrap(),
+            "bucket",
+        )
+        .unwrap();
+
+        let id = ObjectId::from_bytes(b"2222222222abcdef1234567890abcdef");
+
+        let _obj_1_read_ref = backend.read_object(&id).unwrap();
     }
 }
