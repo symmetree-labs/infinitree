@@ -17,43 +17,46 @@ use tokio::{
 };
 
 #[derive(Clone)]
-pub struct Cache<Upstream> {
+pub struct Cache {
     file_list: Arc<tokio::sync::RwLock<LruCache<ObjectId, FileAccess>>>,
     in_flight: Arc<HashMap<ObjectId, Option<JoinHandle<()>>>>,
 
-    size_limit: NonZeroUsize,
-    upstream: Upstream,
+    size_limit: usize,
+    upstream: Arc<dyn Backend>,
     directory: Arc<Directory>,
 }
 
-impl<Upstream> Cache<Upstream> {
+impl Cache {
     pub fn new(
         local: impl AsRef<Path>,
         size_limit: NonZeroUsize,
-        upstream: Upstream,
-    ) -> Result<Self> {
+        upstream: Arc<dyn Backend>,
+    ) -> Result<Arc<Self>> {
         let local = PathBuf::from(local.as_ref());
+        std::fs::create_dir_all(&local)?;
         let mut file_list = read_dir(&local)?
-            .filter_map(|result|
-			result.ok().and_then(|entry| {
-			    if let Ok(ftype) = entry.file_type() {
-				let is_hidden = {
-				    let raw_name = entry.file_name();
-				    let name = raw_name.to_string_lossy();
-				    name.starts_with('.')
-				};
+            .filter_map(
+                |result| {
+                    result.ok().and_then(|entry| {
+                        if let Ok(ftype) = entry.file_type() {
+                            let is_hidden = {
+                                let raw_name = entry.file_name();
+                                let name = raw_name.to_string_lossy();
+                                name.starts_with('.')
+                            };
 
-				if ftype.is_file() && !is_hidden {
-				    return Some(entry)
-				}}
-			    None
-			})
-		// 	match de {
-                // Ok(de) => match de.file_type().map(|ft| ft.is_file()) {
-                //     Ok(true) => Some(de),
-                //     _ => None,
-                // },
-                // _ => None,
+                            if ftype.is_file() && !is_hidden {
+                                return Some(entry);
+                            }
+                        }
+                        None
+                    })
+                }, // 	match de {
+                   // Ok(de) => match de.file_type().map(|ft| ft.is_file()) {
+                   //     Ok(true) => Some(de),
+                   //     _ => None,
+                   // },
+                   // _ => None,
             )
             .map(FileAccess::from)
             .collect::<Vec<_>>();
@@ -82,11 +85,12 @@ impl<Upstream> Cache<Upstream> {
 
         Ok(Self {
             upstream,
-            size_limit,
+            size_limit: size_limit.get(),
             directory: Directory::new(local)?,
             in_flight: Arc::default(),
             file_list: Arc::new(tokio::sync::RwLock::new(files)),
-        })
+        }
+        .into())
     }
 
     async fn make_space_for_object(&self) -> Result<Vec<ObjectId>> {
@@ -94,7 +98,7 @@ impl<Upstream> Cache<Upstream> {
 
         // due to the async-icity of this, we don't want to sit on a
         // read-lock for the entire scope of this function
-        while self.file_list.read().await.len() * crate::BLOCK_SIZE >= self.size_limit.into() {
+        while self.file_list.read().await.len() * crate::BLOCK_SIZE >= self.size_limit {
             // unwrap won't blow up, because if it is `None`, that
             // implies `files.len()` is 0, while `size_limit` is
             // non-zero, therefore we won't enter the loop
@@ -131,7 +135,7 @@ impl<Upstream> Cache<Upstream> {
     }
 }
 
-impl<Upstream: 'static + Backend + Clone> Backend for Cache<Upstream> {
+impl Backend for Cache {
     fn write_object(&self, object: &WriteObject) -> Result<()> {
         let cache = self.clone();
         let object = object.clone();
@@ -172,6 +176,8 @@ impl<Upstream: 'static + Backend + Clone> Backend for Cache<Upstream> {
     }
 
     fn sync(&self) -> Result<()> {
+        self.upstream.sync()?;
+
         let mut handles = vec![];
         self.in_flight.for_each(|_, v| {
             if let Some(handle) = std::mem::take(v) {
@@ -180,9 +186,8 @@ impl<Upstream: 'static + Backend + Clone> Backend for Cache<Upstream> {
         });
 
         task::block_in_place(move || {
-            runtime::Handle::current().block_on(async move {
-                futures::future::join_all(handles.into_iter()).await;
-            })
+            runtime::Handle::current()
+                .block_on(async move { futures::future::join_all(handles.into_iter()).await })
         });
         Ok(())
     }
@@ -238,18 +243,18 @@ mod test {
         let backend = Cache::new(
             &data_root,
             NonZeroUsize::new(4).unwrap(),
-            InMemoryBackend::new(),
+            InMemoryBackend::shared(),
         )
         .unwrap();
 
         let id_1 = *object.id();
         let id_2 = ObjectId::from_bytes(b"1234567890abcdef1234567890abcdef");
 
-        write_and_wait_for_commit(&backend, &object);
+        write_and_wait_for_commit(backend.as_ref(), &object);
         let _obj_1_read_ref = backend.read_object(object.id()).unwrap();
 
         object.set_id(id_2);
-        write_and_wait_for_commit(&backend, &object);
+        write_and_wait_for_commit(backend.as_ref(), &object);
 
         let test_filename = data_root.join(id_1.to_string());
         // 1st one is evicted automatically, hence `unwrap_err()`

@@ -18,9 +18,9 @@ mmap = ["memmap2"]
 s3 = ["futures", "tokio", "rusty-s3"]
 rustls = ["reqwest/rustls-tls"]
 native-tls = ["reqwest/native-tls-alpn"]
-
+test = []
 # internal use only
-_test = ["s3", "native-tls"]
+_test = ["test", "s3", "native-tls"]
 
 [dependencies]
 blake3 = "1.3.1"
