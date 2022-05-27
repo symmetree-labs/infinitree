@@ -54,10 +54,22 @@ pub trait Backend: Send + Sync {
         self.read_object(id)
     }
 
-    fn keep_warm(&self, _objects: &[ObjectId]) {}
+    fn keep_warm(&self, _objects: &[ObjectId]) -> Result<()> {
+        Ok(())
+    }
 }
 
-#[cfg(any(test, feature = "test"))]
+#[cfg(feature = "tokio")]
+mod tokio {
+    use std::future::Future;
+    use tokio::{runtime, task};
+
+    pub(crate) fn block_on<O>(fut: impl Future<Output = O>) -> O {
+        task::block_in_place(move || runtime::Handle::current().block_on(fut))
+    }
+}
+
+#[cfg(any(test, bench, feature = "test"))]
 pub mod test {
     use super::*;
     use std::{collections::HashMap, sync::Mutex};

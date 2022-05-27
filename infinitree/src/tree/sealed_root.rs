@@ -76,7 +76,7 @@ where
     };
 
     let (objects, transaction_list) = {
-        let object = backend.read_object(&root)?;
+        let object = backend.read_fresh(&root)?;
         let stream_ptr =
             parse_transactions_stream(root, crypto, object.as_inner(), &mut buffer, pool.lease()?)?;
         let stream_objects = stream_ptr.objects();
@@ -85,6 +85,9 @@ where
 
         (stream_objects, stream.read_next::<TransactionList>()?)
     };
+
+    backend.keep_warm(&objects)?;
+    backend.preload(&objects)?;
 
     let mut root = RootIndex::<CustomData> {
         objects: objects.into(),
@@ -107,7 +110,7 @@ where
     let mut writer = Pool::new(
         NonZeroUsize::new(1).unwrap(),
         AEADWriter::for_root(
-            backend,
+            backend.clone(),
             crypto.clone(),
             HEADER_SIZE as u64,
             take(&mut index.objects.write()),
@@ -127,7 +130,9 @@ where
         sink.clear()?
     };
 
-    *index.objects.write() = stream.objects();
+    let objects_written = stream.objects();
+    backend.keep_warm(&objects_written)?;
+    *index.objects.write() = objects_written;
 
     let stream_buf = crate::serialize_to_vec(&stream)?;
     let mut head: [u8; HEADER_SIZE] = writer
