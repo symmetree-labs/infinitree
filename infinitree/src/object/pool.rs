@@ -94,6 +94,7 @@ pub struct PoolRef<O> {
 }
 
 impl<O> Drop for PoolRef<O> {
+    #[inline(always)]
     fn drop(&mut self) {
         self.enqueue
             .take()
@@ -104,30 +105,35 @@ impl<O> Drop for PoolRef<O> {
 impl<O> Deref for PoolRef<O> {
     type Target = O;
 
+    #[inline(always)]
     fn deref(&self) -> &Self::Target {
         self.instance.as_ref().unwrap()
     }
 }
 
 impl<O> DerefMut for PoolRef<O> {
+    #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.instance.as_mut().unwrap()
     }
 }
 
 impl<O> AsRef<O> for PoolRef<O> {
+    #[inline(always)]
     fn as_ref(&self) -> &O {
         self.instance.as_ref().unwrap()
     }
 }
 
 impl<O> AsMut<O> for PoolRef<O> {
+    #[inline(always)]
     fn as_mut(&mut self) -> &mut O {
         self.instance.as_mut().unwrap()
     }
 }
 
 impl<O> From<O> for PoolRef<O> {
+    #[inline(always)]
     fn from(instance: O) -> Self {
         Self {
             instance: Some(instance),

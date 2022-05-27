@@ -1,4 +1,4 @@
-use super::{Backend, Result};
+use super::{tokio::block_on, Backend, Result};
 use crate::object::{Object, ObjectId, ReadBuffer, ReadObject, WriteObject};
 use anyhow::Context;
 use reqwest::Client;
@@ -14,10 +14,6 @@ use tokio::{
 
 mod region;
 pub use region::Region;
-
-fn block_on<O>(fut: impl Future<Output = O>) -> O {
-    task::block_in_place(move || runtime::Handle::current().block_on(fut))
-}
 
 struct InFlightTracker<TaskResult>
 where
@@ -316,7 +312,9 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[should_panic]
+    #[should_panic(
+        expected = r#"Generic { source: Bad response: 404, <?xml version="1.0" encoding="UTF-8"?><Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error> }"#
+    )]
     async fn s3_reading_nonexistent_object() {
         let addr = SocketAddr::from(SERVER_ADDR_RO);
         setup_s3_server(&addr);

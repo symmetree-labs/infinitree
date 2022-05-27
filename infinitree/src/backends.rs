@@ -49,6 +49,12 @@ pub trait Backend: Send + Sync {
     fn sync(&self) -> Result<()> {
         Ok(())
     }
+
+    fn read_fresh(&self, id: &ObjectId) -> Result<Arc<ReadObject>> {
+        self.read_object(id)
+    }
+
+    fn keep_warm(&self, _objects: &[ObjectId]) {}
 }
 
 #[cfg(any(test, feature = "test"))]
