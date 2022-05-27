@@ -146,7 +146,10 @@ impl Cache {
         if self.file_list.write().await.get(id).is_some()
             || self.warm.read_async(id, |_| true).await.is_some()
         {
-            self.directory.read_object(id)
+            match self.directory.read_object(id) {
+                ok @ Ok(_) => ok,
+                Err(_) => self.read_upstream(id).await,
+            }
         } else {
             self.read_upstream(id).await
         }
@@ -193,8 +196,16 @@ impl Backend for Cache {
         Ok(())
     }
 
-    fn preload(&self, _objects: &[ObjectId]) -> Result<()> {
-        // todo!();
+    fn preload(&self, objects: &[ObjectId]) -> Result<()> {
+        let cache = self.clone();
+        let objects = objects.to_vec();
+
+        tokio::task::spawn_blocking(move || {
+            for id in objects {
+                let _ = cache.read_object(&id).unwrap();
+            }
+        });
+
         Ok(())
     }
 

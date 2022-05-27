@@ -24,6 +24,8 @@ where
     /// rewritten first, but only with index data.
     #[infinitree(skip)]
     pub(crate) objects: Serialized<Vec<ObjectId>>,
+    #[infinitree(skip)]
+    pub(crate) shadow_root: Serialized<ObjectId>,
 }
 
 impl<CustomData> Default for RootIndex<CustomData>
@@ -35,6 +37,7 @@ where
             transaction_log: Serialized::default(),
             commit_list: Serialized::default(),
             objects: Serialized::default(),
+            shadow_root: Serialized::default(),
         }
     }
 }
@@ -55,5 +58,21 @@ where
         }
 
         None
+    }
+
+    pub(crate) fn objects(&self) -> Vec<ObjectId> {
+        let root = self.objects.read();
+        let transactions = self.transaction_log.read();
+        let mut stream = root
+            .iter()
+            .cloned()
+            .chain(
+                transactions
+                    .iter()
+                    .flat_map(|(_, _, stream)| stream.objects()),
+            )
+            .collect::<std::collections::HashSet<_>>();
+        stream.remove(&self.shadow_root.read());
+        stream.into_iter().collect::<Vec<_>>()
     }
 }

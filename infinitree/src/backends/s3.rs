@@ -7,7 +7,6 @@ use rusty_s3::{S3Action, UrlStyle};
 use scc::HashMap;
 use std::{env, future::Future, sync::Arc, time::Duration};
 use tokio::{
-    runtime,
     sync::Semaphore,
     task::{self, JoinError, JoinHandle},
 };
@@ -52,21 +51,19 @@ where
     TaskResult: 'static + Send,
 {
     pub fn complete_all(&self) -> std::result::Result<Vec<TaskResult>, JoinError> {
-        task::block_in_place(move || {
-            runtime::Handle::current().block_on(async move {
-                let mut handles = vec![];
-                self.active
-                    .retain_async(|_, v| {
-                        if let Some(handle) = std::mem::take(Arc::get_mut(v).unwrap()) {
-                            handles.push(handle);
-                        }
+        block_on(async move {
+            let mut handles = vec![];
+            self.active
+                .retain_async(|_, v| {
+                    if let Some(handle) = std::mem::take(Arc::get_mut(v).unwrap()) {
+                        handles.push(handle);
+                    }
 
-                        false
-                    })
-                    .await;
+                    false
+                })
+                .await;
 
-                futures::future::join_all(handles).await
-            })
+            futures::future::join_all(handles).await
         })
         .into_iter()
         .filter(|result| match result {

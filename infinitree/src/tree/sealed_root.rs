@@ -75,25 +75,31 @@ where
         })
     };
 
-    let (objects, transaction_list) = {
+    let (shadow_root, objects, transaction_list) = {
         let object = backend.read_fresh(&root)?;
-        let stream_ptr =
+        let (shadow_root, stream_ptr) =
             parse_transactions_stream(root, crypto, object.as_inner(), &mut buffer, pool.lease()?)?;
-        let stream_objects = stream_ptr.objects();
 
+        let stream_objects = stream_ptr.objects();
         let mut stream = DeserializeStream::new(stream_ptr.open_with_buffer(pool.lease()?, buffer));
 
-        (stream_objects, stream.read_next::<TransactionList>()?)
+        (
+            shadow_root,
+            stream_objects,
+            stream.read_next::<TransactionList>()?,
+        )
     };
 
-    backend.keep_warm(&objects)?;
-    backend.preload(&objects)?;
-
     let mut root = RootIndex::<CustomData> {
+        shadow_root: shadow_root.into(),
         objects: objects.into(),
         ..Default::default()
     };
     root.load_all_from(&transaction_list, &pool)?;
+
+    let objects = root.objects();
+    backend.preload(&objects)?;
+    backend.keep_warm(&objects)?;
 
     Ok(root)
 }
@@ -135,10 +141,12 @@ where
     *index.objects.write() = objects_written;
 
     let stream_buf = crate::serialize_to_vec(&stream)?;
-    let mut head: [u8; HEADER_SIZE] = writer
+    let root_pointer = writer
         .write_chunk(&secure_hash(&stream_buf), &stream_buf)?
-        .into_raw()
-        .into();
+        .into_raw();
+    *index.shadow_root.write() = root_pointer.file;
+
+    let mut head: [u8; HEADER_SIZE] = root_pointer.into();
 
     let pointer = crypto.encrypt_chunk(Some(root), &Digest::default(), &mut head[..HEADER_PAYLOAD]);
     head[HEADER_PAYLOAD..].copy_from_slice(&pointer.tag);
@@ -154,7 +162,7 @@ fn parse_transactions_stream(
     raw: &[u8],
     buffer: &mut [u8],
     mut reader: PoolRef<AEADReader>,
-) -> Result<Stream> {
+) -> Result<(ObjectId, Stream)> {
     let tag = {
         let mut tag = Tag::default();
         tag.copy_from_slice(&raw[HEADER_PAYLOAD..HEADER_SIZE]);
@@ -177,7 +185,8 @@ fn parse_transactions_stream(
     let transactions_pointer =
         RawChunkPointer::parse(crypto.decrypt_chunk(buffer, raw, Some(root), &root_pointer));
 
-    reader.override_root_id(transactions_pointer.file, root);
+    let shadow_root = transactions_pointer.file;
+    reader.override_root_id(shadow_root, root);
 
     let stream: Stream = deserialize_from_slice(reader.decrypt_decompress(
         buffer,
@@ -185,5 +194,5 @@ fn parse_transactions_stream(
         &transactions_pointer.into(),
     )?)?;
 
-    Ok(stream)
+    Ok((shadow_root, stream))
 }
