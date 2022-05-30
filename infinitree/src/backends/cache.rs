@@ -119,13 +119,10 @@ impl Cache {
             .expect("the task shouldn't be aborted")?;
 
         if !self.warm.contains(&id) {
-            self.file_list
-                .write()
-                .await
-                .put(id.clone(), FileAccess::new(id));
+            self.file_list.write().await.put(id, FileAccess::new(id));
         }
 
-        return Ok(evicted);
+        Ok(evicted)
     }
 
     async fn read_upstream(&self, id: &ObjectId) -> Result<Arc<ReadObject>> {
@@ -158,7 +155,7 @@ impl Cache {
 
 impl Backend for Cache {
     fn write_object(&self, object: &WriteObject) -> Result<()> {
-        self.upstream.write_object(&object)?;
+        self.upstream.write_object(object)?;
         block_on(self.add_new_object(object.clone()))?;
         Ok(())
     }
