@@ -28,7 +28,7 @@ getrandom = "0.2.6"
 ring = "0.16.20"
 rust-argon2 = "1.0.0"
 
-lz4_flex = { version = "0.9.3", default-features = false, features = ["frame"] }
+lz4_flex = { version = "0.9.3", default-features = false, features = ["safe-decode", "checked-decode", "frame"] }
 
 scc = "0.7.1"
 flume = "0.10.12"
