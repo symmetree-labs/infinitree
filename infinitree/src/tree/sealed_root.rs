@@ -81,6 +81,18 @@ where
             parse_transactions_stream(root, crypto, object.as_inner(), &mut buffer, pool.lease()?)?;
 
         let stream_objects = stream_ptr.objects();
+
+        // TODO
+        //
+        // This stream *might* be stale in the cache. Very likely,
+        // though, it's tightly packed with the root object.
+        //
+        // It would be prudent to ensure that all objects of the
+        // stream are up-to-date.
+        //
+        // If you encounter an unexplicable decryption bug when using
+        // caches, you probably have a huge transaction log.
+        //
         let mut stream = DeserializeStream::new(stream_ptr.open_with_buffer(pool.lease()?, buffer));
 
         (
