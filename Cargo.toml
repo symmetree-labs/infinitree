@@ -2,4 +2,5 @@
 members = [
     "infinitree",
     "infinitree-macros",
+    "infinitree-backends",
 ]

@@ -1,6 +1,9 @@
-use super::{tokio::block_on, Backend, BackendError, Directory, Result};
-use crate::object::{ObjectId, ReadObject, WriteObject};
+use super::block_on;
 use anyhow::Context;
+use infinitree::{
+    backends::{Backend, BackendError, Directory, Result},
+    object::{ObjectId, ReadObject, WriteObject},
+};
 use lru::LruCache;
 use scc::HashSet;
 use std::{
@@ -12,8 +15,10 @@ use std::{
     time::SystemTime,
 };
 
+pub type Cache = FSCache<{ infinitree::BLOCK_SIZE }>;
+
 #[derive(Clone)]
-pub struct Cache {
+pub struct FSCache<const BLOCK_SIZE: usize> {
     file_list: Arc<tokio::sync::RwLock<LruCache<ObjectId, FileAccess>>>,
     warm: Arc<HashSet<ObjectId>>,
 
@@ -22,16 +27,17 @@ pub struct Cache {
     directory: Arc<Directory>,
 }
 
-impl Cache {
+impl<const BLOCK_SIZE: usize> FSCache<BLOCK_SIZE> {
     pub fn new(
         local: impl AsRef<Path>,
         size_limit_b: NonZeroUsize,
         upstream: Arc<dyn Backend>,
     ) -> Result<Arc<Self>> {
         let size_limit = size_limit_b.get();
-        if size_limit < crate::BLOCK_SIZE {
+        if size_limit < BLOCK_SIZE {
             return Err(BackendError::from(anyhow::anyhow!(
-                "cache size needs to be at least 4MiB"
+                "cache size needs to be at least {} bytes",
+                BLOCK_SIZE
             )));
         }
 
@@ -86,7 +92,7 @@ impl Cache {
     }
 
     async fn size(&self) -> usize {
-        crate::BLOCK_SIZE * (self.warm.len() + self.file_list.read().await.len())
+        BLOCK_SIZE * (self.warm.len() + self.file_list.read().await.len())
     }
 
     async fn make_space_for_object(&self) -> Result<Vec<ObjectId>> {
@@ -94,7 +100,7 @@ impl Cache {
 
         // due to the async-icity of this, we don't want to sit on a
         // read-lock for the entire scope of this function
-        while self.size().await > self.size_limit - crate::BLOCK_SIZE {
+        while self.size().await > self.size_limit - BLOCK_SIZE {
             let file = self
                 .file_list
                 .write()
@@ -153,7 +159,7 @@ impl Cache {
     }
 }
 
-impl Backend for Cache {
+impl<const BLOCK_SIZE: usize> Backend for FSCache<BLOCK_SIZE> {
     fn write_object(&self, object: &WriteObject) -> Result<()> {
         self.upstream.write_object(object)?;
         block_on(self.add_new_object(object.clone()))?;
@@ -169,7 +175,7 @@ impl Backend for Cache {
     }
 
     fn keep_warm(&self, objects: &[ObjectId]) -> Result<()> {
-        if objects.len() * crate::BLOCK_SIZE > self.size_limit {
+        if objects.len() * BLOCK_SIZE > self.size_limit {
             return Err(BackendError::from(anyhow::anyhow!(
                 "keep-warm list is larger than cache size!"
             )));
@@ -242,15 +248,12 @@ impl From<DirEntry> for FileAccess {
 #[cfg(test)]
 mod test {
     use super::Cache;
-    use crate::{
-        backends::test::{write_and_wait_for_commit, InMemoryBackend},
-        object::WriteObject,
-        Backend, ObjectId, TEST_DATA_DIR,
-    };
+    use crate::test::{write_and_wait_for_commit, TEST_DATA_DIR};
+    use infinitree::{backends::test::InMemoryBackend, object::WriteObject, Backend, ObjectId};
     use std::{env, num::NonZeroUsize, path::Path};
 
     #[test]
-    #[should_panic(expected = "cache size needs to be at least 4MiB")]
+    #[should_panic(expected = "cache size needs to be at least 4194304 bytes")]
     fn cache_at_least_block_size() {
         Cache::new(
             "/whatever",
@@ -271,7 +274,7 @@ mod test {
 
         let backend = Cache::new(
             &data_root,
-            NonZeroUsize::new(1 * crate::BLOCK_SIZE).unwrap(),
+            NonZeroUsize::new(1 * infinitree::BLOCK_SIZE).unwrap(),
             InMemoryBackend::shared(),
         )
         .unwrap();

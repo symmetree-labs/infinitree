@@ -51,7 +51,7 @@
 //!
 //! fn main() -> anyhow::Result<()> {
 //!     let mut tree = Infinitree::<VersionedMap<String, usize>>::empty(
-//!         Directory::new("test_data")?,
+//!         Directory::new("../test_data")?,
 //!         Key::from_credentials("username", "password")?
 //!     ).unwrap();
 //!
@@ -173,12 +173,6 @@
 #[cfg(any(test, doctest, bench))]
 use criterion as _;
 
-#[cfg(all(any(test, doctest, bench), not(feature = "s3")))]
-use s3_server as _;
-
-#[cfg(all(any(test, doctest, bench), not(feature = "s3")))]
-use hyper as _;
-
 #[macro_use]
 extern crate serde_derive;
 
@@ -209,8 +203,7 @@ use rmp_serde::encode::write as serialize_to_writer;
 use rmp_serde::to_vec as serialize_to_vec;
 use rmp_serde::Deserializer;
 
-// Use block size of 4MiB for now
-const BLOCK_SIZE: usize = 4 * 1024 * 1024;
+pub const BLOCK_SIZE: usize = 4 * 1024 * 1024;
 
 #[cfg(test)]
-const TEST_DATA_DIR: &'static str = "test_data";
+const TEST_DATA_DIR: &'static str = "../test_data";

@@ -1,6 +1,9 @@
-use super::{tokio::block_on, Backend, Result};
-use crate::object::{Object, ObjectId, ReadBuffer, ReadObject, WriteObject};
+use super::block_on;
 use anyhow::Context;
+use infinitree::{
+    backends::{Backend, Result},
+    object::{Object, ObjectId, ReadBuffer, ReadObject, WriteObject},
+};
 use reqwest::Client;
 pub use rusty_s3::{Bucket, Credentials};
 use rusty_s3::{S3Action, UrlStyle};
@@ -246,13 +249,11 @@ impl Backend for S3 {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        backends::{test::write_and_wait_for_commit, S3},
-        object::WriteObject,
-        Backend, ObjectId, TEST_DATA_DIR,
-    };
+    use super::S3;
+    use crate::test::{write_and_wait_for_commit, TEST_DATA_DIR};
     use hyper::service::make_service_fn;
     use hyper::Server;
+    use infinitree::{object::WriteObject, Backend, ObjectId};
     use s3_server::{storages::fs::FileSystem, S3Service, SimpleAuth};
     use std::{
         future,

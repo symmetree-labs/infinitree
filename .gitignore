@@ -1,5 +1,5 @@
 Cargo.lock
 /target
-/infinitree/test_data/*
+/test_data
 *~
 *#

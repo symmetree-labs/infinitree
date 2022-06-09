@@ -5,15 +5,6 @@ use std::{io, sync::Arc};
 mod directory;
 pub use directory::Directory;
 
-#[cfg(feature = "s3")]
-mod s3;
-#[cfg(feature = "s3")]
-pub use self::s3::*;
-#[cfg(feature = "tokio")]
-mod cache;
-#[cfg(feature = "tokio")]
-pub use cache::Cache;
-
 #[derive(thiserror::Error, Debug)]
 pub enum BackendError {
     #[error("IO error: {source}")]
@@ -59,26 +50,10 @@ pub trait Backend: Send + Sync {
     }
 }
 
-#[cfg(feature = "tokio")]
-mod tokio {
-    use std::future::Future;
-    use tokio::{runtime, task};
-
-    pub(crate) fn block_on<O>(fut: impl Future<Output = O>) -> O {
-        task::block_in_place(move || runtime::Handle::current().block_on(fut))
-    }
-}
-
 #[cfg(any(test, bench, feature = "test"))]
 pub mod test {
     use super::*;
     use std::{collections::HashMap, sync::Mutex};
-
-    #[allow(unused)]
-    pub(crate) fn write_and_wait_for_commit(backend: &impl Backend, object: &WriteObject) {
-        backend.write_object(object).unwrap();
-        backend.sync().unwrap();
-    }
 
     #[derive(Clone, Default)]
     pub struct InMemoryBackend(Arc<Mutex<HashMap<ObjectId, Arc<ReadObject>>>>);

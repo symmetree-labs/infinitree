@@ -8,7 +8,7 @@ use std::{fmt, str::FromStr};
 /// # Example
 /// ```
 /// use std::str::FromStr;
-/// use infinitree::backends::Region;
+/// use infinitree_backends::Region;
 ///
 /// // Parse from a string
 /// let region: Region = "us-east-1".parse().unwrap();

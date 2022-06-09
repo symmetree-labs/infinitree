@@ -187,7 +187,6 @@ mod test {
         TEST_DATA_DIR,
     };
     use std::{
-        env,
         path::{Path, PathBuf},
         sync::Arc,
     };
@@ -219,10 +218,7 @@ mod test {
         dir_name: &'static str,
     ) -> (Arc<Object<ReadBuffer>>, PathBuf) {
         let mut object = WriteObject::default();
-        let data_root = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap())
-            .join(TEST_DATA_DIR)
-            .join(dir_name);
-        std::fs::create_dir_all(&data_root).unwrap();
+        let data_root = Path::new(TEST_DATA_DIR).join(dir_name);
 
         let backend = Directory::new(&data_root).unwrap();
         let id_1 = *object.id();
