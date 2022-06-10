@@ -50,6 +50,8 @@ impl RawChunkPointer {
         next += size_of::<Tag>();
         pointer.tag.copy_from_slice(&buffer[read..next]);
 
+        debug_assert!(next == size_of::<Self>());
+
         pointer
     }
 }
