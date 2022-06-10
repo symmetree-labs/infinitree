@@ -182,51 +182,53 @@ where
         self.buffer.as_mut()
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn clear(&mut self) {
-        for i in self.buffer.as_mut().iter_mut() {
-            *i = 0;
-        }
+        self.as_inner_mut().fill(0)
     }
 
     #[inline(always)]
     pub fn tail_mut(&mut self) -> &mut [u8] {
-        &mut self.buffer.as_mut()[self.cursor..]
+        let cursor = self.cursor;
+        &mut self.as_inner_mut()[cursor..]
     }
 
+    #[inline(always)]
     pub fn position_mut(&mut self) -> &mut usize {
         &mut self.cursor
     }
 
     #[inline(always)]
     pub fn write_head(&mut self, buf: &[u8]) {
-        self.buffer.as_mut()[..buf.len()].copy_from_slice(buf);
+        self.as_inner_mut()[..buf.len()].copy_from_slice(buf);
     }
 
     #[inline(always)]
     pub fn randomize_head(&mut self, random: &impl Random, size: usize) {
-        random.fill(&mut self.buffer.as_mut()[..size])
+        random.fill(&mut self.as_inner_mut()[..size])
     }
 
     #[inline(always)]
     pub fn finalize(&mut self, random: &impl Random) {
-        random.fill(&mut self.buffer.as_mut()[self.cursor..])
+        random.fill(self.tail_mut())
     }
 }
 
-impl<T> io::Write for Object<T>
-where
-    T: AsMut<[u8]>,
-{
-    #[inline(always)]
+impl io::Write for WriteObject {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let ofs = self.cursor;
         let len = buf.len();
 
-        self.buffer.as_mut()[ofs..(ofs + len)].copy_from_slice(buf);
-        self.cursor += len;
+        let slice = self.as_inner_mut().get_mut(ofs..(ofs + len));
 
-        Ok(len)
+        match slice {
+            Some(slice) => {
+                slice.copy_from_slice(buf);
+                self.cursor += len;
+                Ok(len)
+            }
+            _ => Err(io::Error::from(io::ErrorKind::UnexpectedEof)),
+        }
     }
 
     #[inline(always)]
@@ -235,27 +237,23 @@ where
     }
 }
 
-impl<T> io::Read for Object<T>
-where
-    T: AsRef<[u8]>,
-{
-    #[inline]
+impl io::Read for ReadObject {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let end = buf.len() + self.cursor;
-        let inner = self.as_inner();
+        let inner = self.as_inner().get(self.cursor..end);
 
-        if end > inner.len() {
-            Err(io::Error::from(io::ErrorKind::UnexpectedEof))
-        } else {
-            buf.copy_from_slice(&inner[self.cursor..end]);
-            self.cursor = end;
-            Ok(buf.len())
+        match inner {
+            Some(inner) => {
+                buf.copy_from_slice(inner);
+                self.cursor = end;
+                Ok(buf.len())
+            }
+            _ => Err(io::Error::from(io::ErrorKind::UnexpectedEof)),
         }
     }
 }
 
 impl<T> io::Seek for Object<T> {
-    #[inline(always)]
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         use io::SeekFrom::*;
 
