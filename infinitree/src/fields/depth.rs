@@ -17,7 +17,7 @@ pub trait Depth: sealed::Sealed {
     fn resolve(
         index: Pool<AEADReader>,
         transactions: TransactionList,
-    ) -> Box<dyn Iterator<Item = DeserializeStream>>;
+    ) -> Box<dyn Iterator<Item = DeserializeStream> + Sync + Send>;
 }
 
 mod sealed {
@@ -52,7 +52,7 @@ impl Depth for Incremental {
     fn resolve(
         index: Pool<AEADReader>,
         transactions: TransactionList,
-    ) -> Box<dyn Iterator<Item = DeserializeStream>> {
+    ) -> Box<dyn Iterator<Item = DeserializeStream> + Sync + Send> {
         Box::new(full_history(index, transactions))
     }
 }
@@ -62,7 +62,7 @@ impl Depth for Snapshot {
     fn resolve(
         index: Pool<AEADReader>,
         transactions: TransactionList,
-    ) -> Box<dyn Iterator<Item = DeserializeStream>> {
+    ) -> Box<dyn Iterator<Item = DeserializeStream> + Sync + Send> {
         Box::new(full_history(index, transactions).take(1))
     }
 }

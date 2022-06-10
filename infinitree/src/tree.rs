@@ -317,11 +317,11 @@ where
     pub fn iter<K, O, Q>(
         &self,
         mut field: Intent<Box<Q>>,
-        pred: impl Fn(&K) -> QueryAction + 'static,
-    ) -> Result<impl Iterator<Item = O> + '_>
+        pred: impl Fn(&K) -> QueryAction + Send + Sync + 'static,
+    ) -> Result<impl Iterator<Item = O> + Send + Sync + '_>
     where
         for<'de> <Q as fields::Collection>::Serialized: serde::Deserialize<'de>,
-        Q: Collection<Key = K, Item = O> + 'static,
+        Q: Collection<Key = K, Item = O> + Send + Sync + 'static,
     {
         let pred = Arc::new(pred);
         let commits_for_field = self.field_for_version(&field.name);
