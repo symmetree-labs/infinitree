@@ -41,7 +41,6 @@ serde_with = "1.13.0"
 rmp-serde = "1.1.0"
 
 secrecy = "0.8.0"
-zeroize = "1.5.5"
 
 infinitree-macros = { version = "0.8.1", path = "../infinitree-macros" }
 

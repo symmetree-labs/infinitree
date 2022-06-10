@@ -2,9 +2,8 @@ use crate::{chunks::RawChunkPointer, object::ObjectId};
 
 use getrandom::getrandom;
 use ring::aead;
-use secrecy::{ExposeSecret, Secret};
+use secrecy::{ExposeSecret, Secret, Zeroize};
 use thiserror::Error;
-use zeroize::Zeroize;
 
 const CRYPTO_DIGEST_SIZE: usize = 32;
 type Nonce = [u8; 12];
