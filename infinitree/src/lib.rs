@@ -188,7 +188,7 @@ pub mod tree;
 
 pub use backends::Backend;
 pub use chunks::ChunkPointer;
-pub use crypto::{secure_hash, Digest, Key};
+pub use crypto::{Digest, Hasher, Key};
 pub use id::Id;
 pub use index::Index;
 pub use object::ObjectId;

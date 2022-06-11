@@ -7,6 +7,12 @@ use crate::{
 pub type WriterPool<W> = super::Pool<W>;
 
 impl<W: 'static + Writer> Writer for WriterPool<W> {
+    fn write(&mut self, data: &[u8]) -> Result<ChunkPointer> {
+        let mut writer = self.lease()?;
+
+        writer.write(data)
+    }
+
     fn write_chunk(&mut self, hash: &Digest, data: &[u8]) -> Result<ChunkPointer> {
         let mut writer = self.lease()?;
 

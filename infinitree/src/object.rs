@@ -365,5 +365,9 @@ pub mod test {
         fn flush(&mut self) -> Result<()> {
             Ok(())
         }
+
+        fn write(&mut self, data: &[u8]) -> Result<ChunkPointer> {
+            self.write_chunk(&Digest::default(), data)
+        }
     }
 }

@@ -1,5 +1,6 @@
 use crate::{chunks::RawChunkPointer, object::ObjectId};
 
+pub use blake3::Hasher;
 use getrandom::getrandom;
 use ring::aead;
 use secrecy::{ExposeSecret, Secret, Zeroize};
@@ -44,14 +45,6 @@ pub struct ObjectOperations {
 pub type RootKey = ObjectOperations;
 pub type ChunkKey = ObjectOperations;
 
-#[inline]
-pub fn secure_hash(content: &[u8]) -> Digest {
-    let mut output = Digest::default();
-    output.copy_from_slice(blake3::hash(content).as_bytes());
-
-    output
-}
-
 pub(crate) trait CryptoProvider: Random + Send + Sync + Clone {
     fn encrypt_chunk(
         &self,
@@ -67,6 +60,10 @@ pub(crate) trait CryptoProvider: Random + Send + Sync + Clone {
         source_id: Option<ObjectId>,
         chunk: &RawChunkPointer,
     ) -> &'buf mut [u8];
+
+    fn hash(&self, data: &[u8]) -> Digest;
+
+    fn hasher(&self) -> Hasher;
 }
 
 impl Key {
@@ -165,6 +162,18 @@ impl CryptoProvider for ObjectOperations {
         .unwrap();
 
         &mut target[..size]
+    }
+
+    #[inline]
+    fn hash(&self, content: &[u8]) -> Digest {
+        let mut output = Digest::default();
+        output.copy_from_slice(blake3::hash(content).as_bytes());
+
+        output
+    }
+
+    fn hasher(&self) -> Hasher {
+        blake3::Hasher::new()
     }
 }
 

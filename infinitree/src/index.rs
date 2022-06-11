@@ -155,6 +155,7 @@ pub(crate) trait IndexExt: Index {
         sink: &mut BufferedSink<W>,
         object: &mut dyn Writer,
         mut hashed_data: Vec<u8>,
+        crypto: impl crate::crypto::CryptoProvider,
     ) -> anyhow::Result<(CommitId, Vec<(Field, Stream)>)> {
         let log = self
             .store_all()?
@@ -163,7 +164,7 @@ pub(crate) trait IndexExt: Index {
             .collect();
         hashed_data.extend(crate::serialize_to_vec(&log)?);
 
-        let version = crate::crypto::secure_hash(&hashed_data);
+        let version = crypto.hash(&hashed_data);
         Ok((CommitId::from_bytes(version), log))
     }
 

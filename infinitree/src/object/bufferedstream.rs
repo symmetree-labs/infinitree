@@ -231,10 +231,7 @@ where
         let internal = self.buffer.as_mut();
 
         if self.len > 0 {
-            self.chunks.push(self.writer.write_chunk(
-                &crate::crypto::secure_hash(&internal[0..self.len]),
-                &internal[0..self.len],
-            )?);
+            self.chunks.push(self.writer.write(&internal[0..self.len])?);
         }
 
         Ok(())

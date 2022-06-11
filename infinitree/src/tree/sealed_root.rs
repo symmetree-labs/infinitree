@@ -1,7 +1,7 @@
 use crate::{
     backends::{Backend, BackendError},
     chunks::RawChunkPointer,
-    crypto::{secure_hash, CryptoProvider, Digest, RootKey, Tag},
+    crypto::{CryptoProvider, Digest, RootKey, Tag},
     deserialize_from_slice,
     index::{FieldReader, IndexExt, TransactionList},
     object::{
@@ -138,7 +138,7 @@ where
     let stream = {
         let mut sink = BufferedSink::new(writer.clone());
 
-        let (commit_id, fields) = index.commit(&mut sink, &mut writer, vec![])?;
+        let (commit_id, fields) = index.commit(&mut sink, &mut writer, vec![], crypto.clone())?;
         let transactions = fields
             .into_iter()
             .map(|(field, stream)| (commit_id, field, stream))
@@ -153,9 +153,7 @@ where
     *index.objects.write() = objects_written;
 
     let stream_buf = crate::serialize_to_vec(&stream)?;
-    let root_pointer = writer
-        .write_chunk(&secure_hash(&stream_buf), &stream_buf)?
-        .into_raw();
+    let root_pointer = writer.write(&stream_buf)?.into_raw();
     *index.shadow_root.write() = root_pointer.file;
 
     let mut head: [u8; HEADER_SIZE] = root_pointer.into();

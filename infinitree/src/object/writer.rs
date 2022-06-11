@@ -26,6 +26,7 @@ impl Mode {
 }
 
 pub trait Writer: Send {
+    fn write(&mut self, data: &[u8]) -> Result<ChunkPointer>;
     fn write_chunk(&mut self, hash: &Digest, data: &[u8]) -> Result<ChunkPointer>;
     fn flush(&mut self) -> Result<()>;
 }
@@ -164,6 +165,10 @@ impl Writer for AEADWriter {
         self.object.seek(SeekFrom::Start(self.mode.skip()))?;
 
         Ok(())
+    }
+
+    fn write(&mut self, data: &[u8]) -> Result<ChunkPointer> {
+        self.write_chunk(&self.crypto.hash(data), data)
     }
 }
 

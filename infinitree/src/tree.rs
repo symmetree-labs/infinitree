@@ -241,6 +241,7 @@ where
             &mut sink,
             &mut object,
             crate::serialize_to_vec(&metadata)?,
+            self.master_key.get_object_key()?,
         )?;
 
         if let CommitMode::OnlyOnChange = mode {
@@ -415,6 +416,14 @@ where
     /// jobs, or other background tasks.
     pub fn backend(&self) -> Arc<dyn Backend> {
         self.backend.clone()
+    }
+
+    /// Get a hasher that produces hashes only usable with this
+    /// stash's keys
+    ///
+    /// This internally is a keyed Blake3 instance.
+    pub fn hasher(&self) -> Result<crate::Hasher> {
+        self.master_key.get_object_key()?.hasher()
     }
 
     /// Returns the number of index objects
