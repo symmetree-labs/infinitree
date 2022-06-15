@@ -1,10 +1,41 @@
-use crate::{chunks::RawChunkPointer, object::ObjectId};
+// enum KeySource {
+//     /// Use the username and password combination to derive root
+//     /// object id and encryption key
+//     UserPass { user: String, password: String },
 
+//     /// Use the given secret key to derive the root object id and root
+//     /// encryption key
+//     Symmetric { key: Secret<Vec<u8>> },
+
+//     /// Symmetrically encrypt the index, but object contents can only
+//     /// be decrypted if the secret key is supplied
+//     CryptoBox {
+//         user: String,
+//         password: String,
+//         public_key: Vec<u8>,
+//         secret_key: Option<Vec<u8>>,
+//     },
+
+//     /// Yubikey challenge-response authentication
+//     /// Derive the root object id from the username/password pair, and
+//     /// mix the Yubikey HMAC response into the encryption key derivation.
+//     ///
+//     /// On every write the root encryption key will change, and the
+//     /// 20-byte challenge is written to the root object header
+//     /// unencrypted.
+//     YubikeyCR { user: String, password: String },
+// }
+
+use crate::{chunks::RawChunkPointer, object::ObjectId};
 pub use blake3::Hasher;
-use getrandom::getrandom;
 use ring::aead;
+pub use ring::rand::{SecureRandom, SystemRandom};
 use secrecy::{ExposeSecret, Secret, Zeroize};
+use std::sync::Arc;
 use thiserror::Error;
+
+pub(crate) mod symmetric08;
+pub use symmetric08::Key;
 
 const CRYPTO_DIGEST_SIZE: usize = 32;
 type Nonce = [u8; 12];
@@ -19,33 +50,32 @@ type RawKey = Secret<[u8; CRYPTO_DIGEST_SIZE]>;
 pub type Digest = [u8; CRYPTO_DIGEST_SIZE];
 pub type Tag = [u8; 16];
 
-#[derive(Error, Debug)]
-pub enum CryptoError {
-    #[error("Key error: {source}")]
-    KeyError {
-        #[from]
-        source: argon2::Error,
-    },
-}
-pub type Result<T> = std::result::Result<T, CryptoError>;
+pub trait KeySource: 'static + CryptoScheme + Send + Sync {}
+impl<T> KeySource for T where T: 'static + CryptoScheme + Send + Sync {}
 
-pub struct Key {
-    master_key: RawKey,
-}
+pub(crate) const HEADER_SIZE: usize = 512;
 
-pub trait Random {
-    fn fill(&self, buf: &mut [u8]);
+pub(crate) type CryptoOps = Arc<dyn CryptoProvider>;
+pub(crate) type CryptoSchemeRef = Arc<dyn 'static + CryptoScheme + Send + Sync>;
+
+pub(crate) type SealedHeader = [u8; HEADER_SIZE];
+pub struct CleartextHeader {
+    pub(crate) root_ptr: RawChunkPointer,
+    pub(crate) key: CryptoSchemeRef,
 }
 
-#[derive(Clone)]
-pub struct ObjectOperations {
-    key: RawKey,
+pub trait CryptoScheme {
+    fn root_object_id(&self) -> Result<ObjectId>;
+    fn open_root(self: Arc<Self>, header: SealedHeader) -> Result<CleartextHeader>;
+    fn seal_root(&self, header: CleartextHeader) -> Result<SealedHeader>;
+
+    fn chunk_key(&self) -> Result<ChunkKey>;
+    fn index_key(&self) -> Result<IndexKey>;
+
+    fn master_key(&self) -> Option<RawKey>;
 }
 
-pub type RootKey = ObjectOperations;
-pub type ChunkKey = ObjectOperations;
-
-pub(crate) trait CryptoProvider: Random + Send + Sync + Clone {
+pub(crate) trait CryptoProvider: Send + Sync {
     fn encrypt_chunk(
         &self,
         object_id: Option<ObjectId>,
@@ -66,145 +96,60 @@ pub(crate) trait CryptoProvider: Random + Send + Sync + Clone {
     fn hasher(&self) -> Hasher;
 }
 
-impl Key {
-    pub fn from_credentials(username: impl AsRef<str>, password: impl AsRef<str>) -> Result<Key> {
-        derive_argon2(username.as_ref().as_bytes(), password.as_ref().as_bytes())
-            .map(|k| Key { master_key: k })
-    }
+macro_rules! key_type {
+    ($name:ident) => {
+        #[derive(Clone)]
+        pub struct $name(CryptoOps);
 
-    pub(crate) fn root_object_id(&self) -> Result<ObjectId> {
-        derive_subkey(&self.master_key, "zerostash.com 2022 root object id")
-            .map(|k| ObjectId::from_bytes(k.expose_secret()))
-    }
+        impl $name {
+            pub(crate) fn new(ops: impl CryptoProvider + 'static) -> Self {
+                Self(Arc::new(ops))
+            }
 
-    pub(crate) fn get_root_key(&self) -> Result<RootKey> {
-        derive_subkey(&self.master_key, "zerostash.com 2022 metadata key")
-            .map(ObjectOperations::new)
-    }
-
-    pub(crate) fn get_object_key(&self) -> Result<ChunkKey> {
-        derive_subkey(&self.master_key, "zerostash.com 2022 object base key")
-            .map(ObjectOperations::new)
-    }
-}
-
-impl ObjectOperations {
-    pub fn new(key: RawKey) -> ObjectOperations {
-        ObjectOperations { key }
-    }
-}
-
-impl Random for ObjectOperations {
-    #[inline]
-    fn fill(&self, buf: &mut [u8]) {
-        getrandom(buf).unwrap()
-    }
-}
-
-impl CryptoProvider for ObjectOperations {
-    #[inline]
-    fn encrypt_chunk(
-        &self,
-        object_id: Option<ObjectId>,
-        hash: &Digest,
-        data: &mut [u8],
-    ) -> RawChunkPointer {
-        // Since the keys are always rotating, it's generally safe to
-        // provide a predictible nonce
-        let nonce_base = object_id.unwrap_or_default();
-        let aead = get_aead(derive_chunk_key(&self.key, hash));
-        let ring_tag = aead
-            .seal_in_place_separate_tag(
-                get_chunk_nonce(&nonce_base, data.len() as u32),
-                aead::Aad::empty(),
-                data,
-            )
-            .unwrap();
-
-        let mut tag = Tag::default();
-        tag.copy_from_slice(ring_tag.as_ref());
-
-        RawChunkPointer {
-            offs: 0,
-            size: data.len() as u32,
-            file: nonce_base,
-            hash: *hash,
-            tag,
+            pub(crate) fn unwrap(self) -> CryptoOps {
+                self.0
+            }
         }
-    }
 
-    #[inline]
-    fn decrypt_chunk<'buf>(
-        &self,
-        target: &'buf mut [u8],
-        source: &[u8],
-        source_id: Option<ObjectId>,
-        chunk: &RawChunkPointer,
-    ) -> &'buf mut [u8] {
-        let size = chunk.size as usize;
-        let cyphertext_size = size + chunk.tag.len();
-        let nonce_base = source_id.unwrap_or_default();
+        impl CryptoProvider for $name {
+            fn encrypt_chunk(
+                &self,
+                object_id: Option<ObjectId>,
+                hash: &Digest,
+                data: &mut [u8],
+            ) -> RawChunkPointer {
+                self.0.encrypt_chunk(object_id, hash, data)
+            }
 
-        assert!(target.len() >= cyphertext_size);
+            fn decrypt_chunk<'buf>(
+                &self,
+                target: &'buf mut [u8],
+                source: &[u8],
+                source_id: Option<ObjectId>,
+                chunk: &RawChunkPointer,
+            ) -> &'buf mut [u8] {
+                self.0.decrypt_chunk(target, source, source_id, chunk)
+            }
 
-        let start = chunk.offs as usize;
-        let end = start + size;
+            fn hash(&self, data: &[u8]) -> Digest {
+                self.0.hash(data)
+            }
 
-        target[..size].copy_from_slice(&source[start..end]);
-        target[size..cyphertext_size].copy_from_slice(&chunk.tag);
-
-        let aead = get_aead(derive_chunk_key(&self.key, &chunk.hash));
-        aead.open_in_place(
-            get_chunk_nonce(&nonce_base, chunk.size),
-            aead::Aad::empty(),
-            &mut target[..cyphertext_size],
-        )
-        .unwrap();
-
-        &mut target[..size]
-    }
-
-    #[inline]
-    fn hash(&self, content: &[u8]) -> Digest {
-        let mut output = Digest::default();
-        output.copy_from_slice(blake3::hash(content).as_bytes());
-
-        output
-    }
-
-    fn hasher(&self) -> Hasher {
-        blake3::Hasher::new()
-    }
+            fn hasher(&self) -> Hasher {
+                self.0.hasher()
+            }
+        }
+    };
 }
+
+key_type!(IndexKey);
+key_type!(ChunkKey);
 
 #[inline]
 fn get_aead(key: RawKey) -> aead::LessSafeKey {
     let key =
         aead::UnboundKey::new(&aead::CHACHA20_POLY1305, key.expose_secret()).expect("bad key");
     aead::LessSafeKey::new(key)
-}
-
-#[inline]
-fn derive_chunk_key(key_src: &RawKey, hash: &Digest) -> RawKey {
-    let mut key = *key_src.expose_secret();
-    for i in 0..key.len() {
-        key[i] ^= hash[i];
-    }
-    Secret::new(key)
-}
-
-#[inline]
-fn get_chunk_nonce(object_id: &ObjectId, data_size: u32) -> aead::Nonce {
-    let mut nonce = Nonce::default();
-    let len = nonce.len();
-    nonce.copy_from_slice(&object_id.as_ref()[..len]);
-
-    let size = data_size.to_le_bytes();
-    for i in 0..size.len() {
-        nonce[i] ^= size[i];
-    }
-
-    aead::Nonce::assume_unique_for_key(nonce)
 }
 
 fn derive_argon2(salt_raw: &[u8], password: &[u8]) -> Result<RawKey> {
@@ -232,29 +177,20 @@ fn derive_subkey(key: &RawKey, ctx: &str) -> Result<RawKey> {
     Ok(Secret::new(outbuf))
 }
 
-#[cfg(test)]
-mod test {
-    #[test]
-    fn test_chunk_encryption() {
-        use super::{CryptoProvider, ObjectOperations};
-        use crate::object::WriteObject;
-        use secrecy::Secret;
-        use std::io::Write;
+#[derive(Error, Debug)]
+pub enum CryptoError {
+    #[error("Key error: {source}")]
+    KeyError {
+        #[from]
+        source: argon2::Error,
+    },
+    #[error("Fatal error")]
+    Fatal,
+}
+pub type Result<T> = std::result::Result<T, CryptoError>;
 
-        let key = Secret::new(*b"abcdef1234567890abcdef1234567890");
-        let hash = b"1234567890abcdef1234567890abcdef";
-        let cleartext = b"the quick brown fox jumps ";
-        let size = cleartext.len();
-        let crypto = ObjectOperations::new(key);
-        let mut obj = WriteObject::default();
-
-        let mut encrypted = cleartext.clone();
-        let cp = crypto.encrypt_chunk(Some(*obj.id()), hash, &mut encrypted);
-        obj.write(&encrypted).unwrap();
-
-        let mut decrypted = vec![0; size + cp.tag.len()];
-        crypto.decrypt_chunk(&mut decrypted, obj.as_ref(), Some(*obj.id()), &cp);
-
-        assert_eq!(&decrypted[..size], cleartext.as_ref());
+impl From<ring::error::Unspecified> for CryptoError {
+    fn from(_: ring::error::Unspecified) -> Self {
+        CryptoError::Fatal
     }
 }

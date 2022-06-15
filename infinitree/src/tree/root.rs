@@ -1,5 +1,5 @@
 use super::commit::*;
-use crate::{fields::Serialized, index::TransactionList, ObjectId};
+use crate::{crypto::CryptoSchemeRef, fields::Serialized, index::TransactionList, ObjectId};
 use serde::{de::DeserializeOwned, Serialize};
 
 /// The root index of the tree that stores version information
@@ -24,20 +24,35 @@ where
     /// rewritten first, but only with index data.
     #[infinitree(skip)]
     pub(crate) objects: Serialized<Vec<ObjectId>>,
+
     #[infinitree(skip)]
     pub(crate) shadow_root: Serialized<ObjectId>,
+
+    #[infinitree(skip)]
+    pub(crate) key: CryptoSchemeRef,
 }
 
-impl<CustomData> Default for RootIndex<CustomData>
+impl<CustomData> RootIndex<CustomData>
 where
     CustomData: Serialize + DeserializeOwned + Send + Sync + 'static,
 {
-    fn default() -> Self {
+    pub(crate) fn new(shadow_root: ObjectId, objects: Vec<ObjectId>, key: CryptoSchemeRef) -> Self {
         Self {
-            transaction_log: Serialized::default(),
-            commit_list: Serialized::default(),
-            objects: Serialized::default(),
-            shadow_root: Serialized::default(),
+            transaction_log: Default::default(),
+            commit_list: Default::default(),
+            objects: objects.into(),
+            shadow_root: shadow_root.into(),
+            key,
+        }
+    }
+
+    pub(crate) fn uninitialized(key: CryptoSchemeRef) -> Self {
+        Self {
+            transaction_log: Default::default(),
+            commit_list: Default::default(),
+            objects: Default::default(),
+            shadow_root: Default::default(),
+            key,
         }
     }
 }

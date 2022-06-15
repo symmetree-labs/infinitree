@@ -2,7 +2,7 @@ use super::{BlockBuffer, Result};
 use crate::{
     backends::Backend,
     compress,
-    crypto::{ChunkKey, CryptoProvider, RootKey},
+    crypto::{ChunkKey, CryptoOps, IndexKey},
     ChunkPointer, ObjectId,
 };
 
@@ -29,7 +29,7 @@ pub trait Reader: Send {
 
 pub struct AEADReader {
     backend: Arc<dyn Backend>,
-    crypto: ChunkKey,
+    crypto: CryptoOps,
     buffer: BlockBuffer,
     mode: Mode,
     get_object_id: GetObjectId,
@@ -39,17 +39,17 @@ impl AEADReader {
     pub fn new(backend: Arc<dyn Backend>, crypto: ChunkKey) -> Self {
         AEADReader {
             backend,
-            crypto,
+            crypto: crypto.unwrap(),
             buffer: BlockBuffer::default(),
             mode: Mode::Data,
             get_object_id: default_object_getter(),
         }
     }
 
-    pub(crate) fn for_root(backend: Arc<dyn Backend>, crypto: RootKey) -> Self {
+    pub(crate) fn for_root(backend: Arc<dyn Backend>, crypto: IndexKey) -> Self {
         AEADReader {
             backend,
-            crypto,
+            crypto: crypto.unwrap(),
             buffer: BlockBuffer::default(),
             mode: Mode::SealRoot,
             get_object_id: default_object_getter(),

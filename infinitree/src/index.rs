@@ -230,14 +230,14 @@ pub(crate) mod test {
         use std::sync::Arc;
 
         let key = Secret::new(*b"abcdef1234567890abcdef1234567890");
-        let crypto = crypto::ObjectOperations::new(key);
+        let crypto = crypto::symmetric08::ObjectOperations::new(key);
         let storage = Arc::new(backends::test::InMemoryBackend::default());
 
-        let writer = || AEADWriter::new(storage.clone(), crypto.clone());
+        let writer = || AEADWriter::new(storage.clone(), crypto::ChunkKey::new(crypto.clone()));
         let reader = {
             let storage = storage.clone();
             let crypto = crypto.clone();
-            move || AEADReader::new(storage.clone(), crypto.clone())
+            move || AEADReader::new(storage.clone(), crypto::ChunkKey::new(crypto.clone()))
         };
 
         let object = {

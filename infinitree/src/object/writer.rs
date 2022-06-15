@@ -2,9 +2,10 @@ use super::{ObjectError, ObjectId, Result, WriteObject};
 use crate::{
     backends::Backend,
     compress,
-    crypto::{ChunkKey, CryptoProvider, Digest, Random, RootKey},
+    crypto::{ChunkKey, CryptoOps, Digest, IndexKey},
     ChunkPointer,
 };
+use ring::rand::{SecureRandom, SystemRandom};
 use std::{
     io::{Seek, SeekFrom},
     sync::Arc,
@@ -33,7 +34,8 @@ pub trait Writer: Send {
 
 pub struct AEADWriter {
     backend: Arc<dyn Backend>,
-    crypto: ChunkKey,
+    random: SystemRandom,
+    crypto: CryptoOps,
     object: WriteObject,
     mode: Mode,
     rewrite: Vec<ObjectId>,
@@ -42,12 +44,14 @@ pub struct AEADWriter {
 impl AEADWriter {
     pub fn new(backend: Arc<dyn Backend>, crypto: ChunkKey) -> Self {
         let mut object = WriteObject::default();
-        object.reset_id(&crypto);
+        let random = SystemRandom::new();
+        reset_id(&mut object, &random);
 
         AEADWriter {
             backend,
-            crypto,
             object,
+            random,
+            crypto: crypto.unwrap(),
             mode: Mode::Data,
             rewrite: vec![],
         }
@@ -55,45 +59,59 @@ impl AEADWriter {
 
     pub fn for_root(
         backend: Arc<dyn Backend>,
-        crypto: RootKey,
+        crypto: IndexKey,
         header_size: u64,
         mut rewrite: Vec<ObjectId>,
     ) -> Self {
+        let random = SystemRandom::new();
         let mut object = WriteObject::default();
         object.seek(SeekFrom::Start(header_size)).unwrap();
 
-        reset_id(&mut object, &crypto, &mut rewrite);
+        rewrite_or_reset_id(&mut object, &random, &mut rewrite);
 
         AEADWriter {
             backend,
-            crypto,
             object,
             rewrite,
+            random,
+            crypto: crypto.unwrap(),
             mode: Mode::SealRoot(header_size),
         }
     }
 
     pub(crate) fn flush_root_head(&mut self, id: ObjectId, head: &[u8]) -> Result<()> {
         self.object.set_id(id);
-        self.object.write_head(head);
-        self.object.finalize(&self.crypto);
+        self.write_head(head);
+        self.finalize()?;
         self.backend.write_object(&self.object)?;
 
         self.rewrite.clear();
-        self.object.reset_id(&self.crypto);
+        reset_id(&mut self.object, &self.random);
         self.object.seek(SeekFrom::Start(self.mode.skip()))?;
 
         Ok(())
+    }
+
+    fn finalize(&mut self) -> Result<()> {
+        self.random
+            .fill(self.object.tail_mut())
+            .map_err(|_| ObjectError::Fatal)?;
+        Ok(())
+    }
+
+    fn write_head(&mut self, content: &[u8]) {
+        self.object.head_mut(content.len()).copy_from_slice(content);
     }
 }
 
 impl Clone for AEADWriter {
     fn clone(&self) -> Self {
         let mut object = self.object.clone();
-        object.reset_id(&self.crypto);
+        reset_id(&mut object, &self.random);
 
         AEADWriter {
             object,
+            random: self.random.clone(),
             backend: self.backend.clone(),
             crypto: self.crypto.clone(),
             mode: self.mode.clone(),
@@ -154,13 +172,14 @@ impl Writer for AEADWriter {
 
     fn flush(&mut self) -> Result<()> {
         if let Mode::SealRoot(header_size) = self.mode {
-            self.object
-                .randomize_head(&self.crypto, header_size.try_into().unwrap());
+            self.random
+                .fill(self.object.head_mut(header_size.try_into().unwrap()))
+                .map_err(|_| ObjectError::Fatal)?;
         }
-        self.object.finalize(&self.crypto);
+        self.finalize()?;
         self.backend.write_object(&self.object)?;
 
-        reset_id(&mut self.object, &self.crypto, &mut self.rewrite);
+        rewrite_or_reset_id(&mut self.object, &self.random, &mut self.rewrite);
 
         self.object.seek(SeekFrom::Start(self.mode.skip()))?;
 
@@ -173,6 +192,15 @@ impl Writer for AEADWriter {
 }
 
 #[inline(always)]
-fn reset_id(object: &mut WriteObject, random: &impl Random, rewrite: &mut Vec<ObjectId>) {
+fn rewrite_or_reset_id(
+    object: &mut WriteObject,
+    random: &impl SecureRandom,
+    rewrite: &mut Vec<ObjectId>,
+) {
     object.set_id(rewrite.pop().unwrap_or_else(|| ObjectId::new(random)));
+}
+
+#[inline(always)]
+fn reset_id(object: &mut WriteObject, random: &impl SecureRandom) {
+    object.set_id(ObjectId::new(random));
 }

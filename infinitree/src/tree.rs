@@ -2,12 +2,13 @@
 #![deny(missing_docs)]
 
 use crate::{
+    crypto::{CryptoProvider, KeySource},
     fields::{
         self, depth::Depth, Collection, Intent, Load, Query, QueryAction, QueryIteratorOwned,
     },
     index::{self, Index, IndexExt, TransactionList},
     object::{AEADReader, AEADWriter, BlockBuffer, BufferedSink, Pool, PoolRef},
-    Backend, Key,
+    Backend,
 };
 use anyhow::Result;
 use parking_lot::RwLock;
@@ -48,9 +49,6 @@ where
     /// Backend reference.
     backend: Arc<dyn Backend>,
 
-    /// Key that's used to derive all internal keys.
-    master_key: Key,
-
     /// These are the generations we're currently working on.
     commit_filter: CommitFilter,
 
@@ -88,26 +86,19 @@ where
     ///     Key::from_credentials("username", "password").unwrap()
     /// ).unwrap();
     /// ```
-    pub fn empty(backend: Arc<dyn Backend>, master_key: Key) -> Result<Self> {
-        Self::with_key(backend, I::default(), master_key)
+    pub fn empty(backend: Arc<dyn Backend>, key_source: impl KeySource) -> Result<Self> {
+        Self::with_key(backend, I::default(), key_source)
     }
 
     /// Load all version information from the tree.
     ///
     /// This method doesn't load the index, only the associated
     /// metadata.
-    pub fn open(backend: Arc<dyn Backend>, master_key: Key) -> Result<Self> {
-        let root_object = master_key.root_object_id()?;
-        let root_key = master_key.get_root_key()?;
+    pub fn open(backend: Arc<dyn Backend>, key_source: impl KeySource) -> Result<Self> {
+        let master_key = Arc::new(key_source);
+        let root = sealed_root::open(BlockBuffer::default(), backend.clone(), master_key.clone())?;
+        let chunk_key = master_key.chunk_key()?;
 
-        let root = sealed_root::open(
-            root_object,
-            BlockBuffer::default(),
-            backend.clone(),
-            root_key,
-        )?;
-
-        let chunk_key = master_key.get_object_key()?;
         let reader_pool = {
             let backend = backend.clone();
             Pool::with_constructor(0, move || {
@@ -116,7 +107,6 @@ where
         };
         Ok(Self {
             root,
-            master_key,
             reader_pool,
             backend: backend.clone(),
             index: I::default().into(),
@@ -180,14 +170,14 @@ where
     /// This is primarily useful if you're done writing an `Index`,
     /// and want to commit and persist it, or if you need extra
     /// initialization because `Default` is not viable.
-    pub fn with_key(backend: Arc<dyn Backend>, index: I, master_key: Key) -> Result<Self> {
-        let chunk_key = master_key.get_object_key()?;
+    pub fn with_key(backend: Arc<dyn Backend>, index: I, key: impl KeySource) -> Result<Self> {
+        let master_key = Arc::new(key);
+        let chunk_key = master_key.chunk_key()?;
 
         Ok(Self {
-            master_key,
             backend: backend.clone(),
             index: index.into(),
-            root: RootIndex::default(),
+            root: RootIndex::uninitialized(master_key),
             commit_filter: CommitFilter::default(),
             reader_pool: Pool::with_constructor(0, move || {
                 AEADReader::new(backend.clone(), chunk_key.clone())
@@ -234,14 +224,14 @@ where
         metadata: CommitMetadata<CustomData>,
         mode: CommitMode,
     ) -> Result<Option<Arc<Commit<CustomData>>>> {
-        let mut object = self.object_writer()?;
-        let mut sink = BufferedSink::new(self.object_writer()?);
+        let mut object = self.chunk_writer()?;
+        let mut sink = BufferedSink::new(self.chunk_writer()?);
 
         let (id, changeset) = self.index.write().commit(
             &mut sink,
             &mut object,
             crate::serialize_to_vec(&metadata)?,
-            self.master_key.get_object_key()?,
+            self.root.key.chunk_key()?,
         )?;
 
         if let CommitMode::OnlyOnChange = mode {
@@ -266,12 +256,7 @@ where
                 .push(Commit { id, metadata }.into());
         }
 
-        sealed_root::commit(
-            &mut self.root,
-            self.master_key.root_object_id()?,
-            self.backend.clone(),
-            self.master_key.get_root_key()?,
-        )?;
+        sealed_root::commit(&mut self.root, self.backend.clone())?;
 
         Ok(self.last_commit())
     }
@@ -384,10 +369,10 @@ where
     /// Note that currently there's no fragmenting internally, so
     /// anything written using an ObjectWriter **must** be less than
     /// about 4MB.
-    pub fn object_writer(&self) -> Result<AEADWriter> {
+    pub fn chunk_writer(&self) -> Result<AEADWriter> {
         Ok(AEADWriter::new(
             self.backend.clone(),
-            self.master_key.get_object_key()?,
+            self.root.key.chunk_key()?,
         ))
     }
 
@@ -396,8 +381,8 @@ where
     /// The object reader is for reading out those [`ChunkPointer`][crate::ChunkPointer]s
     /// that you get when using an [`AEADWriter`] stack manually.
     ///
-    /// You can obtain an [`AEADWriter`] using [`object_writer`][Self::object_writer].
-    pub fn object_reader(&self) -> Result<PoolRef<AEADReader>> {
+    /// You can obtain an [`AEADWriter`] using [`object_writer`][Self::chunk_writer].
+    pub fn chunk_reader(&self) -> Result<PoolRef<AEADReader>> {
         Ok(self.reader_pool.lease()?)
     }
 
@@ -423,7 +408,7 @@ where
     ///
     /// This internally is a keyed Blake3 instance.
     pub fn hasher(&self) -> Result<crate::Hasher> {
-        self.master_key.get_object_key()?.hasher()
+        Ok(self.root.key.chunk_key()?.hasher())
     }
 
     /// Returns the number of index objects

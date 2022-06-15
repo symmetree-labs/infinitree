@@ -1,4 +1,4 @@
-use crate::crypto::{Digest, Random};
+use crate::crypto::{Digest, SecureRandom};
 pub use hex::FromHexError;
 use std::{convert::TryFrom, string::ToString};
 
@@ -8,7 +8,7 @@ pub struct Id(Digest);
 
 impl Id {
     #[inline(always)]
-    pub fn new(random: &impl Random) -> Id {
+    pub fn new(random: &impl SecureRandom) -> Id {
         let mut id = Id::default();
         id.reset(random);
         id
@@ -22,8 +22,8 @@ impl Id {
     }
 
     #[inline(always)]
-    pub fn reset(&mut self, random: &impl Random) {
-        random.fill(&mut self.0);
+    pub fn reset(&mut self, random: &impl SecureRandom) {
+        random.fill(&mut self.0).unwrap();
     }
 }
 

@@ -146,7 +146,7 @@ impl<R: Reader> Read for BufferedStream<R> {
 ///     Key::from_credentials("username", "password").unwrap()
 /// ).unwrap();
 ///
-/// let mut sink = BufferedSink::new(tree.object_writer().unwrap());
+/// let mut sink = BufferedSink::new(tree.chunk_writer().unwrap());
 ///
 /// sink.write(b"it's going in the sink");
 /// tree.index().insert("message_1".to_string(), sink.finish().unwrap());
@@ -288,15 +288,13 @@ mod tests {
             super::{AEADReader, AEADWriter},
             BufferedSink,
         };
-        use crate::{backends::test::InMemoryBackend, Key};
+        use crate::{backends::test::InMemoryBackend, crypto::CryptoScheme, Key};
         use std::io::{Read, Write};
 
         let key = Key::from_credentials("asdf", "fdsa").unwrap();
         let backend = InMemoryBackend::shared();
-        let mut sink = BufferedSink::new(AEADWriter::new(
-            backend.clone(),
-            key.get_object_key().unwrap(),
-        ));
+        let mut sink =
+            BufferedSink::new(AEADWriter::new(backend.clone(), key.chunk_key().unwrap()));
 
         // note this is an extreme case, so this test is slow.  the
         // input simultaneously compresses incredibly well, and is
@@ -313,10 +311,7 @@ mod tests {
 
         let mut buffer2 = vec![0u8; SIZE];
         chunks
-            .open_reader(AEADReader::new(
-                backend.clone(),
-                key.get_object_key().unwrap(),
-            ))
+            .open_reader(AEADReader::new(backend.clone(), key.chunk_key().unwrap()))
             .read(&mut buffer2)
             .unwrap();
 

@@ -2,7 +2,6 @@
 use crate::{
     backends::BackendError,
     compress::{CompressError, DecompressError},
-    crypto::Random,
     BLOCK_SIZE,
 };
 
@@ -52,8 +51,6 @@ pub enum ObjectError {
     ChunkTooLarge { max_size: usize, size: usize },
     #[error("Buffer is smaller than required size: {min_size}")]
     BufferTooSmall { min_size: usize },
-    #[error("Fatal internal error")]
-    Fatal,
     #[error("Serialize failed")]
     Serialize {
         source: Box<dyn std::error::Error + Send + Sync>,
@@ -62,6 +59,8 @@ pub enum ObjectError {
     Deserialize {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    #[error("Fatal internal error")]
+    Fatal,
 }
 
 pub type Result<T> = std::result::Result<T, ObjectError>;
@@ -125,10 +124,6 @@ impl<T> Object<T> {
             buffer,
         }
     }
-
-    pub fn reset_id(&mut self, random: &impl Random) {
-        self.id.reset(random)
-    }
 }
 
 impl<T> Object<T> {
@@ -160,6 +155,11 @@ where
     #[inline(always)]
     pub fn as_inner(&self) -> &[u8] {
         self.buffer.as_ref()
+    }
+
+    #[inline(always)]
+    pub fn head(&self, len: usize) -> &[u8] {
+        &self.as_inner()[..len]
     }
 
     pub fn with_id(id: ObjectId, buffer: T) -> Object<T> {
@@ -199,18 +199,8 @@ where
     }
 
     #[inline(always)]
-    pub fn write_head(&mut self, buf: &[u8]) {
-        self.as_inner_mut()[..buf.len()].copy_from_slice(buf);
-    }
-
-    #[inline(always)]
-    pub fn randomize_head(&mut self, random: &impl Random, size: usize) {
-        random.fill(&mut self.as_inner_mut()[..size])
-    }
-
-    #[inline(always)]
-    pub fn finalize(&mut self, random: &impl Random) {
-        random.fill(self.tail_mut())
+    pub fn head_mut(&mut self, len: usize) -> &mut [u8] {
+        &mut self.as_inner_mut()[..len]
     }
 }
 
