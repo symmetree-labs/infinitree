@@ -139,11 +139,11 @@ impl<R: Reader> Read for BufferedStream<R> {
 ///
 /// ```
 /// use std::io::Write;
-/// use infinitree::{Infinitree, Key, fields::Serialized, backends::test::InMemoryBackend, object::{BufferedSink, Stream}};
+/// use infinitree::{Infinitree, UsernamePassword, fields::Serialized, backends::test::InMemoryBackend, object::{BufferedSink, Stream}};
 ///
 /// let mut tree = Infinitree::<infinitree::fields::VersionedMap<String, Stream>>::empty(
 ///     InMemoryBackend::shared(),
-///     Key::from_credentials("username", "password").unwrap()
+///     UsernamePassword::from_credentials("username".to_string().into(), "password".to_string().into()).unwrap()
 /// ).unwrap();
 ///
 /// let mut sink = BufferedSink::new(tree.chunk_writer().unwrap());
@@ -288,10 +288,14 @@ mod tests {
             super::{AEADReader, AEADWriter},
             BufferedSink,
         };
-        use crate::{backends::test::InMemoryBackend, crypto::CryptoScheme, Key};
+        use crate::{backends::test::InMemoryBackend, crypto::CryptoScheme, UsernamePassword};
         use std::io::{Read, Write};
 
-        let key = Key::from_credentials("asdf", "fdsa").unwrap();
+        let key = UsernamePassword::from_credentials(
+            "asdf".to_string().into(),
+            "fdsa".to_string().into(),
+        )
+        .unwrap();
         let backend = InMemoryBackend::shared();
         let mut sink =
             BufferedSink::new(AEADWriter::new(backend.clone(), key.chunk_key().unwrap()));

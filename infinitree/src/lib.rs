@@ -42,7 +42,7 @@
 //! use infinitree::{
 //!     Infinitree,
 //!     Index,
-//!     Key,
+//!     UsernamePassword,
 //!     anyhow,
 //!     backends::Directory,
 //!     fields::{VersionedMap},
@@ -52,7 +52,8 @@
 //! fn main() -> anyhow::Result<()> {
 //!     let mut tree = Infinitree::<VersionedMap<String, usize>>::empty(
 //!         Directory::new("../test_data")?,
-//!         Key::from_credentials("username", "password")?
+//!         UsernamePassword::from_credentials("username".to_string().into(),
+//!                                            "password".to_string().into())?
 //!     ).unwrap();
 //!
 //!     tree.index().insert("sample_size".into(), 1234);
@@ -188,7 +189,7 @@ pub mod tree;
 
 pub use backends::Backend;
 pub use chunks::ChunkPointer;
-pub use crypto::{Digest, Hasher, Key, KeySource};
+pub use crypto::{Digest, Hasher, IKeySource, UsernamePassword};
 pub use id::Id;
 pub use index::Index;
 pub use object::ObjectId;

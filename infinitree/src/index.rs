@@ -155,7 +155,7 @@ pub(crate) trait IndexExt: Index {
         sink: &mut BufferedSink<W>,
         object: &mut dyn Writer,
         mut hashed_data: Vec<u8>,
-        crypto: impl crate::crypto::CryptoProvider,
+        crypto: impl crate::crypto::ICryptoOps,
     ) -> anyhow::Result<(CommitId, Vec<(Field, Stream)>)> {
         let log = self
             .store_all()?
@@ -230,7 +230,7 @@ pub(crate) mod test {
         use std::sync::Arc;
 
         let key = Secret::new(*b"abcdef1234567890abcdef1234567890");
-        let crypto = crypto::symmetric08::ObjectOperations::new(key);
+        let crypto = crypto::symmetric08::ObjectOperations::chunks(key);
         let storage = Arc::new(backends::test::InMemoryBackend::default());
 
         let writer = || AEADWriter::new(storage.clone(), crypto::ChunkKey::new(crypto.clone()));

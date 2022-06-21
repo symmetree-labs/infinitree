@@ -150,24 +150,17 @@ impl Writer for AEADWriter {
         };
 
         let oid = *self.object.id();
-        let mut pointer = {
+        let pointer = {
+            let offs = self.object.position() as u32;
             let buffer = self.object.tail_mut();
 
-            self.crypto.encrypt_chunk(
-                match self.mode {
-                    Mode::Data => Some(oid),
-                    Mode::SealRoot(_) => None,
-                },
-                hash,
-                &mut buffer[..size],
-            )
+            self.crypto
+                .encrypt_chunk(oid, offs, hash, &mut buffer[..size])
         };
 
-        pointer.file = oid;
-        pointer.offs = self.object.position() as u32;
-        *self.object.position_mut() += pointer.size as usize;
+        *self.object.position_mut() += pointer.size();
 
-        Ok(pointer.into())
+        Ok(pointer)
     }
 
     fn flush(&mut self) -> Result<()> {

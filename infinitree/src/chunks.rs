@@ -12,7 +12,7 @@ pub(crate) struct RawChunkPointer {
 }
 
 impl RawChunkPointer {
-    pub(crate) fn parse<T: AsRef<[u8]>>(buffer: T) -> Self {
+    pub(crate) fn parse<T: AsRef<[u8]>>(buffer: T) -> (usize, Self) {
         let buffer = buffer.as_ref();
         let mut pointer = RawChunkPointer::default();
 
@@ -52,38 +52,42 @@ impl RawChunkPointer {
 
         debug_assert!(next == size_of::<Self>());
 
-        pointer
+        (next, pointer)
     }
-}
 
-impl<const N: usize> From<RawChunkPointer> for [u8; N] {
-    fn from(ptr: RawChunkPointer) -> Self {
-        debug_assert!(N > size_of::<RawChunkPointer>());
-
-        let mut buf = [0; N];
+    pub fn write_to(&self, buf: &mut [u8]) -> usize {
+        assert!(buf.len() >= size_of::<RawChunkPointer>());
 
         let mut wrote = 0;
         let mut next = 0;
 
         next += size_of::<u32>();
-        buf[wrote..next].copy_from_slice(&ptr.offs.to_ne_bytes());
+        buf[wrote..next].copy_from_slice(&self.offs.to_ne_bytes());
         wrote = next;
 
         next += size_of::<u32>();
-        buf[wrote..next].copy_from_slice(&ptr.size.to_ne_bytes());
+        buf[wrote..next].copy_from_slice(&self.size.to_ne_bytes());
         wrote = next;
 
         next += size_of::<ObjectId>();
-        buf[wrote..next].copy_from_slice(ptr.file.as_ref());
+        buf[wrote..next].copy_from_slice(self.file.as_ref());
         wrote = next;
 
         next += size_of::<Digest>();
-        buf[wrote..next].copy_from_slice(ptr.hash.as_ref());
+        buf[wrote..next].copy_from_slice(self.hash.as_ref());
         wrote = next;
 
         next += size_of::<Tag>();
-        buf[wrote..next].copy_from_slice(ptr.tag.as_ref());
+        buf[wrote..next].copy_from_slice(self.tag.as_ref());
 
+        next
+    }
+}
+
+impl<const N: usize> From<RawChunkPointer> for [u8; N] {
+    fn from(ptr: RawChunkPointer) -> Self {
+        let mut buf = [0; N];
+        ptr.write_to(&mut buf);
         buf
     }
 }
@@ -104,16 +108,6 @@ pub struct ChunkPointer(RawChunkPointer);
 
 impl ChunkPointer {
     #[inline(always)]
-    pub(crate) fn into_raw(self) -> RawChunkPointer {
-        self.0
-    }
-
-    #[inline(always)]
-    pub(crate) fn as_raw(&self) -> &RawChunkPointer {
-        &self.0
-    }
-
-    #[inline(always)]
     pub fn object_id(&self) -> &ObjectId {
         &self.0.file
     }
@@ -121,6 +115,21 @@ impl ChunkPointer {
     #[inline(always)]
     pub fn hash(&self) -> &Digest {
         &self.0.hash
+    }
+
+    #[inline(always)]
+    pub(crate) fn size(&self) -> usize {
+        self.0.size as usize
+    }
+
+    #[inline(always)]
+    pub(crate) fn into_raw(self) -> RawChunkPointer {
+        self.0
+    }
+
+    #[inline(always)]
+    pub(crate) fn as_raw(&self) -> &RawChunkPointer {
+        &self.0
     }
 }
 
@@ -155,6 +164,6 @@ mod tests {
         };
 
         let buffer: [u8; 128] = ptr.clone().into();
-        assert_eq!(RawChunkPointer::parse(buffer), ptr);
+        assert_eq!(RawChunkPointer::parse(buffer).1, ptr);
     }
 }

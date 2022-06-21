@@ -2,7 +2,7 @@
 #![deny(missing_docs)]
 
 use crate::{
-    crypto::{CryptoProvider, KeySource},
+    crypto::{ICryptoOps, KeySource},
     fields::{
         self, depth::Depth, Collection, Intent, Load, Query, QueryAction, QueryIteratorOwned,
     },
@@ -74,7 +74,7 @@ where
     /// # Examples
     ///
     /// ```no_run
-    /// use infinitree::{Infinitree, Key, fields::Serialized, backends::Directory};
+    /// use infinitree::{Infinitree, UsernamePassword, fields::Serialized, backends::Directory};
     ///
     /// #[derive(infinitree::Index, Default)]
     /// struct Measurements {
@@ -83,21 +83,21 @@ where
     ///
     /// let mut tree = Infinitree::<Measurements>::empty(
     ///     Directory::new("/storage").unwrap(),
-    ///     Key::from_credentials("username", "password").unwrap()
+    ///     UsernamePassword::from_credentials("username".to_string().into(),
+    ///                                        "password".to_string().into()).unwrap()
     /// ).unwrap();
     /// ```
-    pub fn empty(backend: Arc<dyn Backend>, key_source: impl KeySource) -> Result<Self> {
-        Self::with_key(backend, I::default(), key_source)
+    pub fn empty(backend: Arc<dyn Backend>, key: KeySource) -> Result<Self> {
+        Self::with_key(backend, I::default(), key)
     }
 
     /// Load all version information from the tree.
     ///
     /// This method doesn't load the index, only the associated
     /// metadata.
-    pub fn open(backend: Arc<dyn Backend>, key_source: impl KeySource) -> Result<Self> {
-        let master_key = Arc::new(key_source);
-        let root = sealed_root::open(BlockBuffer::default(), backend.clone(), master_key.clone())?;
-        let chunk_key = master_key.chunk_key()?;
+    pub fn open(backend: Arc<dyn Backend>, key: KeySource) -> Result<Self> {
+        let root = sealed_root::open(BlockBuffer::default(), backend.clone(), key.clone())?;
+        let chunk_key = root.key.chunk_key()?;
 
         let reader_pool = {
             let backend = backend.clone();
@@ -129,11 +129,11 @@ where
     /// Any commit message works that implements [`ToString`].
     ///
     /// ```no_run
-    /// use infinitree::{Infinitree, Key, fields::Serialized, backends::Directory};
+    /// use infinitree::{Infinitree, UsernamePassword, fields::Serialized, backends::Directory};
     ///
     /// let mut tree = Infinitree::<infinitree::fields::VersionedMap<String, String>>::empty(
     ///     Directory::new("/storage").unwrap(),
-    ///     Key::from_credentials("username", "password").unwrap()
+    ///     UsernamePassword::from_credentials("username".to_string().into(), "password".to_string().into()).unwrap()
     /// ).unwrap();
     ///
     /// // Commit message can be omitted using `None`
@@ -170,14 +170,13 @@ where
     /// This is primarily useful if you're done writing an `Index`,
     /// and want to commit and persist it, or if you need extra
     /// initialization because `Default` is not viable.
-    pub fn with_key(backend: Arc<dyn Backend>, index: I, key: impl KeySource) -> Result<Self> {
-        let master_key = Arc::new(key);
-        let chunk_key = master_key.chunk_key()?;
+    pub fn with_key(backend: Arc<dyn Backend>, index: I, key: KeySource) -> Result<Self> {
+        let chunk_key = key.chunk_key()?;
 
         Ok(Self {
             backend: backend.clone(),
             index: index.into(),
-            root: RootIndex::uninitialized(master_key),
+            root: RootIndex::uninitialized(key),
             commit_filter: CommitFilter::default(),
             reader_pool: Pool::with_constructor(0, move || {
                 AEADReader::new(backend.clone(), chunk_key.clone())

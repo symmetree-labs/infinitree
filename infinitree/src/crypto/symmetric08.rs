@@ -4,6 +4,8 @@ use ring::aead;
 use secrecy::ExposeSecret;
 use std::{mem::size_of, sync::Arc};
 
+type Nonce = [u8; 12];
+
 pub struct Key {
     master_key: RawKey,
 }
@@ -12,9 +14,21 @@ pub struct Key {
 const HEADER_PAYLOAD: usize = size_of::<SealedHeader>() - size_of::<Tag>();
 
 impl Key {
-    pub fn from_credentials(username: impl AsRef<str>, password: impl AsRef<str>) -> Result<Key> {
-        derive_argon2(username.as_ref().as_bytes(), password.as_ref().as_bytes())
-            .map(|k| Key { master_key: k })
+    pub(crate) fn from_credentials(
+        username: Secret<String>,
+        password: Secret<String>,
+    ) -> Result<KeySource> {
+        let master_key = derive_argon2(
+            b"",
+            username.expose_secret().as_bytes(),
+            password.expose_secret().as_bytes(),
+        )?;
+
+        Ok(Arc::new(Key { master_key }))
+    }
+
+    pub(crate) fn with_key(master_key: RawKey) -> KeySource {
+        Arc::new(Self { master_key })
     }
 
     fn raw_index_key(&self) -> Result<RawKey> {
@@ -31,10 +45,10 @@ impl CryptoScheme for Key {
     fn open_root(self: Arc<Self>, mut header: SealedHeader) -> Result<CleartextHeader> {
         let aead = get_aead(self.raw_index_key()?);
         let nonce = get_chunk_nonce(&self.root_object_id()?, HEADER_PAYLOAD as u32);
-        aead.open_in_place(nonce, aead::Aad::empty(), &mut header)?;
+        aead.open_in_place(nonce, aead::Aad::empty(), header.as_mut())?;
 
         Ok(CleartextHeader {
-            root_ptr: RawChunkPointer::parse(&header),
+            root_ptr: RawChunkPointer::parse(&header).1,
             key: self,
         })
     }
@@ -43,7 +57,8 @@ impl CryptoScheme for Key {
         let aead = get_aead(self.raw_index_key()?);
         let nonce = get_chunk_nonce(&self.root_object_id()?, HEADER_PAYLOAD as u32);
 
-        let mut sealed: SealedHeader = header.root_ptr.into();
+        let mut sealed = SealedHeader::default();
+        header.root_ptr.write_to(&mut sealed);
         let tag = aead.seal_in_place_separate_tag(
             nonce,
             aead::Aad::empty(),
@@ -56,17 +71,17 @@ impl CryptoScheme for Key {
 
     fn chunk_key(&self) -> Result<ChunkKey> {
         derive_subkey(&self.master_key, "zerostash.com 2022 object base key")
-            .map(ObjectOperations::new)
+            .map(ObjectOperations::chunks)
             .map(super::ChunkKey::new)
     }
 
     fn index_key(&self) -> Result<IndexKey> {
         self.raw_index_key()
-            .map(ObjectOperations::new)
+            .map(ObjectOperations::index)
             .map(super::IndexKey::new)
     }
 
-    fn master_key(&self) -> Option<RawKey> {
+    fn expose_convergence_key(&self) -> Option<RawKey> {
         Some(self.master_key.clone())
     }
 }
@@ -74,25 +89,42 @@ impl CryptoScheme for Key {
 #[derive(Clone)]
 pub struct ObjectOperations {
     key: RawKey,
+    is_index: bool,
 }
 
 impl ObjectOperations {
-    pub fn new(key: RawKey) -> ObjectOperations {
-        ObjectOperations { key }
+    pub(crate) fn chunks(key: RawKey) -> ObjectOperations {
+        ObjectOperations {
+            key,
+            is_index: false,
+        }
+    }
+
+    pub(crate) fn index(key: RawKey) -> ObjectOperations {
+        ObjectOperations {
+            key,
+            is_index: true,
+        }
     }
 }
 
-impl CryptoProvider for ObjectOperations {
+impl ICryptoOps for ObjectOperations {
     #[inline]
     fn encrypt_chunk(
         &self,
-        object_id: Option<ObjectId>,
+        file: ObjectId,
+        offs: u32,
         hash: &Digest,
         data: &mut [u8],
-    ) -> RawChunkPointer {
+    ) -> ChunkPointer {
         // Since the keys are always rotating, it's generally safe to
         // provide a predictible nonce
-        let nonce_base = object_id.unwrap_or_default();
+        let nonce_base = if self.is_index {
+            ObjectId::default()
+        } else {
+            file
+        };
+
         let aead = get_aead(derive_chunk_key(&self.key, hash));
         let ring_tag = aead
             .seal_in_place_separate_tag(
@@ -106,12 +138,13 @@ impl CryptoProvider for ObjectOperations {
         tag.copy_from_slice(ring_tag.as_ref());
 
         RawChunkPointer {
-            offs: 0,
             size: data.len() as u32,
-            file: nonce_base,
             hash: *hash,
+            file,
+            offs,
             tag,
         }
+        .into()
     }
 
     #[inline]
@@ -119,12 +152,16 @@ impl CryptoProvider for ObjectOperations {
         &self,
         target: &'buf mut [u8],
         source: &[u8],
-        source_id: Option<ObjectId>,
-        chunk: &RawChunkPointer,
+        chunk_ptr: &ChunkPointer,
     ) -> &'buf mut [u8] {
+        let chunk = chunk_ptr.as_raw();
         let size = chunk.size as usize;
         let cyphertext_size = size + chunk.tag.len();
-        let nonce_base = source_id.unwrap_or_default();
+        let nonce_base = if self.is_index {
+            ObjectId::default()
+        } else {
+            chunk.file
+        };
 
         assert!(target.len() >= cyphertext_size);
 
@@ -183,7 +220,9 @@ fn get_chunk_nonce(object_id: &ObjectId, data_size: u32) -> aead::Nonce {
 
 #[cfg(test)]
 mod test {
-    const TEST_SEALED_HEADER: [u8; super::super::HEADER_SIZE] = [
+    use crate::crypto::SealedHeader;
+
+    const TEST_SEALED_HEADER: SealedHeader = SealedHeader([
         83, 42, 179, 250, 134, 126, 214, 14, 39, 162, 145, 87, 120, 248, 159, 68, 178, 171, 21, 15,
         7, 148, 78, 146, 120, 76, 159, 242, 15, 117, 239, 112, 131, 229, 143, 152, 5, 232, 155,
         176, 128, 17, 74, 135, 50, 103, 177, 96, 96, 143, 252, 148, 253, 220, 82, 232, 250, 234,
@@ -210,12 +249,13 @@ mod test {
         149, 156, 44, 203, 147, 110, 209, 108, 127, 228, 240, 66, 179, 102, 141, 157, 4, 184, 98,
         116, 201, 142, 57, 46, 132, 36, 228, 86, 120, 50, 44, 192, 175, 170, 164, 206, 230, 235,
         161, 41, 86, 220, 54, 46, 167, 162, 52, 252, 218, 186, 171, 60, 43, 0, 26, 89, 32, 8, 198,
-    ];
+    ]);
 
     #[test]
     fn can_decrypt_header() {
         use super::*;
-        let key = Arc::new(Key::from_credentials("test", "test").unwrap());
+        let key =
+            Key::from_credentials("test".to_string().into(), "test".to_string().into()).unwrap();
         let header = key.open_root(TEST_SEALED_HEADER).unwrap();
 
         assert_eq!(header.root_ptr, RawChunkPointer::default());
@@ -224,7 +264,9 @@ mod test {
     #[test]
     fn can_encrypt_header() {
         use super::*;
-        let key = Arc::new(Key::from_credentials("test", "test").unwrap());
+        let key =
+            Key::from_credentials("test".to_string().into(), "test".to_string().into()).unwrap();
+
         let ct = CleartextHeader {
             root_ptr: Default::default(),
             key,
@@ -237,7 +279,7 @@ mod test {
 
     #[test]
     fn test_chunk_encryption() {
-        use super::{CryptoProvider, ObjectOperations};
+        use super::{ICryptoOps, ObjectOperations};
         use crate::object::WriteObject;
         use secrecy::Secret;
         use std::io::Write;
@@ -246,15 +288,15 @@ mod test {
         let hash = b"1234567890abcdef1234567890abcdef";
         let cleartext = b"the quick brown fox jumps ";
         let size = cleartext.len();
-        let crypto = ObjectOperations::new(key);
+        let crypto = ObjectOperations::chunks(key);
         let mut obj = WriteObject::default();
 
         let mut encrypted = cleartext.clone();
-        let cp = crypto.encrypt_chunk(Some(*obj.id()), hash, &mut encrypted);
+        let cp = crypto.encrypt_chunk(*obj.id(), 0, hash, &mut encrypted);
         obj.write(&encrypted).unwrap();
 
-        let mut decrypted = vec![0; size + cp.tag.len()];
-        crypto.decrypt_chunk(&mut decrypted, obj.as_ref(), Some(*obj.id()), &cp);
+        let mut decrypted = vec![0; size + cp.as_raw().tag.len()];
+        crypto.decrypt_chunk(&mut decrypted, obj.as_ref(), &cp);
 
         assert_eq!(&decrypted[..size], cleartext.as_ref());
     }

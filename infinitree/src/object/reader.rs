@@ -13,12 +13,6 @@ fn default_object_getter() -> GetObjectId {
     Box::new(|cp| *cp.object_id())
 }
 
-#[derive(Clone)]
-enum Mode {
-    SealRoot,
-    Data,
-}
-
 pub trait Reader: Send {
     fn read_chunk<'target>(
         &mut self,
@@ -31,7 +25,6 @@ pub struct AEADReader {
     backend: Arc<dyn Backend>,
     crypto: CryptoOps,
     buffer: BlockBuffer,
-    mode: Mode,
     get_object_id: GetObjectId,
 }
 
@@ -41,7 +34,6 @@ impl AEADReader {
             backend,
             crypto: crypto.unwrap(),
             buffer: BlockBuffer::default(),
-            mode: Mode::Data,
             get_object_id: default_object_getter(),
         }
     }
@@ -51,7 +43,6 @@ impl AEADReader {
             backend,
             crypto: crypto.unwrap(),
             buffer: BlockBuffer::default(),
-            mode: Mode::SealRoot,
             get_object_id: default_object_getter(),
         }
     }
@@ -75,15 +66,7 @@ impl AEADReader {
         pointer: &ChunkPointer,
     ) -> Result<&'target [u8]> {
         let cryptbuf: &mut [u8] = self.buffer.as_mut();
-        let buf = self.crypto.decrypt_chunk(
-            cryptbuf,
-            source,
-            match self.mode {
-                Mode::Data => Some(*pointer.object_id()),
-                Mode::SealRoot => None,
-            },
-            pointer.as_raw(),
-        );
+        let buf = self.crypto.decrypt_chunk(cryptbuf, source, pointer);
         let size = compress::decompress_into(buf, target)?;
 
         Ok(&target[..size])

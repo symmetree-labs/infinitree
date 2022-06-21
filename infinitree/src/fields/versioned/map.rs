@@ -624,12 +624,18 @@ mod test {
     use crate::{
         fields::{LocalField, SparseField, Strategy},
         index::test::store_then_load,
-        Infinitree, Key,
+        Infinitree, UsernamePassword,
     };
 
     #[test]
     fn bare_index_can_be_restored() {
-        let key = || Key::from_credentials("bare_index_map", "password").unwrap();
+        let key = || {
+            UsernamePassword::from_credentials(
+                "bare_index_map".to_string().into(),
+                "password".to_string().into(),
+            )
+            .unwrap()
+        };
         let storage = crate::backends::test::InMemoryBackend::shared();
 
         {

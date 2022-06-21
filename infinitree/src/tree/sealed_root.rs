@@ -1,6 +1,6 @@
 use crate::{
     backends::{Backend, BackendError},
-    crypto::{CleartextHeader, CryptoError, CryptoScheme, SealedHeader, HEADER_SIZE},
+    crypto::{CleartextHeader, CryptoError, KeySource, SealedHeader},
     deserialize_from_slice,
     index::{FieldReader, IndexExt, TransactionList},
     object::{
@@ -61,26 +61,26 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 pub(crate) fn open<CustomData>(
     mut buffer: BlockBuffer,
     backend: Arc<dyn Backend>,
-    crypto: Arc<dyn CryptoScheme>,
+    crypto: KeySource,
 ) -> Result<RootIndex<CustomData>>
 where
     CustomData: Serialize + DeserializeOwned + Send + Sync + 'static,
 {
     let root = crypto.root_object_id()?;
-    let index_key = crypto.index_key()?;
-
-    let pool = {
-        let backend = backend.clone();
-        Pool::with_constructor(1, move || {
-            AEADReader::for_root(backend.clone(), index_key.clone())
-        })
-    };
 
     let object = backend.read_fresh(&root)?;
     let header = {
         let mut sealed_header = [0u8; size_of::<SealedHeader>()];
         sealed_header.copy_from_slice(object.head(size_of::<SealedHeader>()));
-        crypto.open_root(sealed_header)?
+        crypto.open_root(sealed_header.into())?
+    };
+
+    let pool = {
+        let backend = backend.clone();
+        let key = header.key.index_key()?;
+        Pool::with_constructor(1, move || {
+            AEADReader::for_root(backend.clone(), key.clone())
+        })
     };
 
     let (shadow_root, objects, transaction_list) = {
@@ -135,7 +135,7 @@ where
         AEADWriter::for_root(
             backend.clone(),
             index_key.clone(),
-            HEADER_SIZE as u64,
+            size_of::<SealedHeader>() as u64,
             take(&mut index.objects.write()),
         ),
     )?;
@@ -179,14 +179,14 @@ fn parse_transactions_stream(
     buffer: &mut [u8],
     mut reader: PoolRef<AEADReader>,
 ) -> Result<(ObjectId, Stream)> {
-    let transactions_pointer = &header.root_ptr;
-    let shadow_root = transactions_pointer.file;
+    let root_ptr = &header.root_ptr;
+    let shadow_root = root_ptr.file;
     reader.override_root_id(shadow_root, header.key.root_object_id()?);
 
     let stream: Stream = deserialize_from_slice(reader.decrypt_decompress(
         buffer,
         raw,
-        &transactions_pointer.clone().into(),
+        &root_ptr.clone().into(),
     )?)?;
 
     Ok((shadow_root, stream))
