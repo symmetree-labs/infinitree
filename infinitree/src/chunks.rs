@@ -6,8 +6,8 @@ use std::mem::size_of;
 pub(crate) struct RawChunkPointer {
     pub offs: u32,
     pub size: u32,
-    pub file: ObjectId,
-    pub hash: Digest,
+    pub object: ObjectId,
+    pub key: Digest,
     pub tag: Tag,
 }
 
@@ -40,11 +40,11 @@ impl RawChunkPointer {
         };
 
         next += size_of::<ObjectId>();
-        pointer.file = ObjectId::from_bytes(&buffer[read..next]);
+        pointer.object = ObjectId::from_bytes(&buffer[read..next]);
         read = next;
 
         next += size_of::<Digest>();
-        pointer.hash.copy_from_slice(&buffer[read..next]);
+        pointer.key.copy_from_slice(&buffer[read..next]);
         read = next;
 
         next += size_of::<Tag>();
@@ -70,11 +70,11 @@ impl RawChunkPointer {
         wrote = next;
 
         next += size_of::<ObjectId>();
-        buf[wrote..next].copy_from_slice(self.file.as_ref());
+        buf[wrote..next].copy_from_slice(self.object.as_ref());
         wrote = next;
 
         next += size_of::<Digest>();
-        buf[wrote..next].copy_from_slice(self.hash.as_ref());
+        buf[wrote..next].copy_from_slice(self.key.as_ref());
         wrote = next;
 
         next += size_of::<Tag>();
@@ -109,12 +109,12 @@ pub struct ChunkPointer(RawChunkPointer);
 impl ChunkPointer {
     #[inline(always)]
     pub fn object_id(&self) -> &ObjectId {
-        &self.0.file
+        &self.0.object
     }
 
     #[inline(always)]
     pub fn hash(&self) -> &Digest {
-        &self.0.hash
+        &self.0.key
     }
 
     #[inline(always)]
@@ -150,8 +150,8 @@ mod tests {
         let ptr = RawChunkPointer {
             offs: 1234,
             size: 1337,
-            file: ObjectId::default(),
-            hash: [
+            object: ObjectId::default(),
+            key: [
                 // intricately weaved pattern to make sure there's no repetition
                 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
                 0x0e, 0x0f, 0xff, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80, 0x90, 0xa0, 0xb0,

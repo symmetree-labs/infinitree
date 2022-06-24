@@ -139,8 +139,8 @@ impl ICryptoOps for ObjectOperations {
 
         RawChunkPointer {
             size: data.len() as u32,
-            hash: *hash,
-            file,
+            key: *hash,
+            object: file,
             offs,
             tag,
         }
@@ -160,7 +160,7 @@ impl ICryptoOps for ObjectOperations {
         let nonce_base = if self.is_index {
             ObjectId::default()
         } else {
-            chunk.file
+            chunk.object
         };
 
         assert!(target.len() >= cyphertext_size);
@@ -171,7 +171,7 @@ impl ICryptoOps for ObjectOperations {
         target[..size].copy_from_slice(&source[start..end]);
         target[size..cyphertext_size].copy_from_slice(&chunk.tag);
 
-        let aead = get_aead(derive_chunk_key(&self.key, &chunk.hash));
+        let aead = get_aead(derive_chunk_key(&self.key, &chunk.key));
         aead.open_in_place(
             get_chunk_nonce(&nonce_base, chunk.size),
             aead::Aad::empty(),

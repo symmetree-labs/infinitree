@@ -159,7 +159,7 @@ where
 
     let stream_buf = crate::serialize_to_vec(&stream)?;
     let root_ptr = writer.write(&stream_buf)?.into_raw();
-    *index.shadow_root.write() = root_ptr.file;
+    *index.shadow_root.write() = root_ptr.object;
 
     let header = CleartextHeader {
         root_ptr,
@@ -180,7 +180,7 @@ fn parse_transactions_stream(
     mut reader: PoolRef<AEADReader>,
 ) -> Result<(ObjectId, Stream)> {
     let root_ptr = &header.root_ptr;
-    let shadow_root = root_ptr.file;
+    let shadow_root = root_ptr.object;
     reader.override_root_id(shadow_root, header.key.root_object_id()?);
 
     let stream: Stream = deserialize_from_slice(reader.decrypt_decompress(

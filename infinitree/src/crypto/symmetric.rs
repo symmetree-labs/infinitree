@@ -260,9 +260,9 @@ impl ICryptoOps for SymmetricOps {
     #[inline]
     fn encrypt_chunk(
         &self,
-        file: ObjectId,
+        object: ObjectId,
         offs: u32,
-        hash: &Digest,
+        key: &Digest,
         data: &mut [u8],
     ) -> ChunkPointer {
         let aead = get_aead((*hash).into());
@@ -280,9 +280,9 @@ impl ICryptoOps for SymmetricOps {
 
         RawChunkPointer {
             size: data.len() as u32,
-            hash: *hash,
+            key: *key,
             offs,
-            file,
+            object,
             tag,
         }
         .into()
@@ -307,10 +307,10 @@ impl ICryptoOps for SymmetricOps {
         target[..size].copy_from_slice(&source[start..end]);
         target[size..cyphertext_size].copy_from_slice(&chunk.tag);
 
-        let aead = get_aead(chunk.hash.into());
+        let aead = get_aead(chunk.key.into());
         aead.open_in_place(
             aead::Nonce::assume_unique_for_key(Nonce::default()),
-            aead::Aad::from(&chunk.file),
+            aead::Aad::from(&chunk.object),
             &mut target[..cyphertext_size],
         )
         .unwrap();
