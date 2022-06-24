@@ -316,7 +316,7 @@ where
                 .flat_map(move |transaction| {
                     QueryIteratorOwned::new(
                         transaction,
-                        self.reader_pool.lease().unwrap(),
+                        self.chunk_reader().unwrap(),
                         pred.clone(),
                         field.strategy.as_mut(),
                     )
@@ -360,6 +360,19 @@ where
             .collect::<Vec<_>>()
     }
 
+    /// Return a handle for an internal object writer.
+    fn chunk_writer(&self) -> Result<AEADWriter> {
+        Ok(AEADWriter::new(
+            self.backend.clone(),
+            self.root.key.chunk_key()?,
+        ))
+    }
+
+    /// Return a handle for an internal object reader
+    fn chunk_reader(&self) -> Result<PoolRef<AEADReader>> {
+        Ok(self.reader_pool.lease()?)
+    }
+
     /// Return a handle for an object writer.
     ///
     /// This can be used to manually write sparse data if you don't
@@ -368,10 +381,10 @@ where
     /// Note that currently there's no fragmenting internally, so
     /// anything written using an ObjectWriter **must** be less than
     /// about 4MB.
-    pub fn chunk_writer(&self) -> Result<AEADWriter> {
-        Ok(AEADWriter::new(
+    pub fn storage_writer(&self) -> Result<AEADWriter> {
+        Ok(AEADWriter::for_storage(
             self.backend.clone(),
-            self.root.key.chunk_key()?,
+            self.root.key.storage_key()?,
         ))
     }
 
@@ -381,8 +394,11 @@ where
     /// that you get when using an [`AEADWriter`] stack manually.
     ///
     /// You can obtain an [`AEADWriter`] using [`object_writer`][Self::chunk_writer].
-    pub fn chunk_reader(&self) -> Result<PoolRef<AEADReader>> {
-        Ok(self.reader_pool.lease()?)
+    pub fn storage_reader(&self) -> Result<PoolRef<AEADReader>> {
+        Ok(PoolRef::without_pool(AEADReader::for_storage(
+            self.backend(),
+            self.root.key.storage_key()?,
+        )))
     }
 
     /// Return an immutable reference to the internal index.

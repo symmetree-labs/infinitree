@@ -87,6 +87,9 @@ pub trait CryptoScheme {
 
     fn chunk_key(&self) -> Result<ChunkKey>;
     fn index_key(&self) -> Result<IndexKey>;
+    fn storage_key(&self) -> Result<StorageKey> {
+        self.chunk_key().map(|ck| StorageKey(ck.0))
+    }
 
     fn expose_convergence_key(&self) -> Option<RawKey>;
 }
@@ -121,10 +124,12 @@ macro_rules! key_type {
         pub struct $name(CryptoOps);
 
         impl $name {
+            #[allow(unused)]
             pub(crate) fn new(ops: impl ICryptoOps + 'static) -> Self {
                 Self(Arc::new(ops))
             }
 
+            #[allow(unused)]
             pub(crate) fn unwrap(self) -> CryptoOps {
                 self.0
             }
@@ -163,6 +168,7 @@ macro_rules! key_type {
 
 key_type!(IndexKey);
 key_type!(ChunkKey);
+key_type!(StorageKey);
 
 #[derive(Clone)]
 pub struct CleartextHeader {

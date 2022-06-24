@@ -93,6 +93,15 @@ pub struct PoolRef<O> {
     instance: Option<O>,
 }
 
+impl<O> PoolRef<O> {
+    pub(crate) fn without_pool(instance: O) -> Self {
+        Self {
+            enqueue: None,
+            instance: Some(instance),
+        }
+    }
+}
+
 impl<O> Drop for PoolRef<O> {
     #[inline(always)]
     fn drop(&mut self) {

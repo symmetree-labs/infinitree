@@ -2,7 +2,7 @@ use super::{ObjectError, ObjectId, Result, WriteObject};
 use crate::{
     backends::Backend,
     compress,
-    crypto::{ChunkKey, CryptoOps, Digest, IndexKey},
+    crypto::{ChunkKey, CryptoOps, Digest, IndexKey, StorageKey},
     ChunkPointer,
 };
 use ring::rand::{SecureRandom, SystemRandom};
@@ -42,7 +42,7 @@ pub struct AEADWriter {
 }
 
 impl AEADWriter {
-    pub fn new(backend: Arc<dyn Backend>, crypto: ChunkKey) -> Self {
+    pub(crate) fn new(backend: Arc<dyn Backend>, crypto: ChunkKey) -> Self {
         let mut object = WriteObject::default();
         let random = SystemRandom::new();
         reset_id(&mut object, &random);
@@ -57,7 +57,22 @@ impl AEADWriter {
         }
     }
 
-    pub fn for_root(
+    pub(crate) fn for_storage(backend: Arc<dyn Backend>, crypto: StorageKey) -> Self {
+        let mut object = WriteObject::default();
+        let random = SystemRandom::new();
+        reset_id(&mut object, &random);
+
+        AEADWriter {
+            backend,
+            object,
+            random,
+            crypto: crypto.unwrap(),
+            mode: Mode::Data,
+            rewrite: vec![],
+        }
+    }
+
+    pub(crate) fn for_root(
         backend: Arc<dyn Backend>,
         crypto: IndexKey,
         header_size: u64,
