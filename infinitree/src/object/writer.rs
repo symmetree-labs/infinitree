@@ -51,7 +51,7 @@ impl AEADWriter {
             backend,
             object,
             random,
-            crypto: crypto.unwrap(),
+            crypto: crypto.into_inner(),
             mode: Mode::Data,
             rewrite: vec![],
         }
@@ -66,7 +66,7 @@ impl AEADWriter {
             backend,
             object,
             random,
-            crypto: crypto.unwrap(),
+            crypto: crypto.into_inner(),
             mode: Mode::Data,
             rewrite: vec![],
         }
@@ -89,7 +89,7 @@ impl AEADWriter {
             object,
             rewrite,
             random,
-            crypto: crypto.unwrap(),
+            crypto: crypto.into_inner(),
             mode: Mode::SealRoot(header_size),
         }
     }

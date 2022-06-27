@@ -52,7 +52,7 @@
 //! fn main() -> anyhow::Result<()> {
 //!     let mut tree = Infinitree::<VersionedMap<String, usize>>::empty(
 //!         Directory::new("../test_data")?,
-//!         UsernamePassword::from_credentials("username".to_string().into(),
+//!         UsernamePassword::with_credentials("username".to_string().into(),
 //!                                            "password".to_string().into())?
 //!     ).unwrap();
 //!
@@ -189,7 +189,7 @@ pub mod tree;
 
 pub use backends::Backend;
 pub use chunks::ChunkPointer;
-pub use crypto::{Digest, Hasher, IKeySource, UsernamePassword};
+pub use crypto::public::*;
 pub use id::Id;
 pub use index::Index;
 pub use object::ObjectId;

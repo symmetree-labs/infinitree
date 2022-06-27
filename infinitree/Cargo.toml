@@ -13,8 +13,9 @@ build = "build.rs"
 readme="../README.md"
 
 [features]
-default = ["mmap"]
+default = ["mmap", "cryptobox"]
 mmap = ["memmap2"]
+cryptobox = ["libsodium-sys-stable"]
 test = []
 # internal use only
 _test = ["test"]
@@ -23,6 +24,7 @@ _test = ["test"]
 blake3 = "1.3.1"
 ring = "0.16.20"
 rust-argon2 = "1.0.0"
+libsodium-sys-stable = { version = "1.19.22", features = ["minimal", "optimized"], optional = true }
 
 lz4_flex = { version = "0.9.3", default-features = false, features = ["safe-decode", "checked-decode", "frame"] }
 

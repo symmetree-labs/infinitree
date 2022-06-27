@@ -1,13 +1,3 @@
-// enum KeySource {
-//     /// Symmetrically encrypt the index, but object contents can only
-//     /// be decrypted if the secret key is supplied
-//     CryptoBox {
-//         user: String,
-//         password: String,
-//         public_key: Vec<u8>,
-//         secret_key: Option<Vec<u8>>,
-//     },
-
 //     /// Yubikey challenge-response authentication
 //     /// Derive the root object id from the username/password pair, and
 //     /// mix the Yubikey HMAC response into the encryption key derivation.
@@ -30,12 +20,25 @@ use std::{
 use thiserror::Error;
 
 pub(crate) mod symmetric;
-pub(crate) mod symmetric08;
 pub use symmetric::UsernamePassword;
+pub(crate) mod symmetric08;
+
+#[cfg(feature = "cryptobox")]
+pub(crate) mod symmetric_cryptobox_storage;
+#[cfg(feature = "cryptobox")]
+pub use symmetric_cryptobox_storage::CryptoBoxStorage;
 
 const HEADER_SIZE: usize = 512;
 const CRYPTO_DIGEST_SIZE: usize = 32;
-type RawKey = Secret<[u8; CRYPTO_DIGEST_SIZE]>;
+
+/// A cryptographic key
+pub type RawKey = Secret<[u8; CRYPTO_DIGEST_SIZE]>;
+
+pub mod public {
+    #[cfg(feature = "cryptobox")]
+    pub use super::CryptoBoxStorage;
+    pub use super::{Digest, Hasher, IKeySource, KeySource, RawKey, UsernamePassword};
+}
 
 // TODO: ideally this should be a tuple struct wrapping blake3::Hash,
 // implementing Serialize & Deserialize and the rest.
@@ -43,7 +46,6 @@ type RawKey = Secret<[u8; CRYPTO_DIGEST_SIZE]>;
 // That way we get constant time equality checks for free, which is
 // prudent to want, but I'm uncertain about a realistic side-channel
 // based on this right now.
-
 /// A cryptographic hash of some data
 pub type Digest = [u8; CRYPTO_DIGEST_SIZE];
 
@@ -55,7 +57,7 @@ pub trait IKeySource: 'static + CryptoScheme + Send + Sync {}
 impl<T> IKeySource for T where T: 'static + CryptoScheme + Send + Sync {}
 
 /// Key source for all crypto operations.
-pub(crate) type KeySource = Arc<dyn IKeySource>;
+pub type KeySource = Arc<dyn IKeySource>;
 
 /// A derived key that's directly usable to execute encypt/decrypt operations.
 pub(crate) type CryptoOps = Arc<dyn ICryptoOps>;
@@ -130,7 +132,7 @@ macro_rules! key_type {
             }
 
             #[allow(unused)]
-            pub(crate) fn unwrap(self) -> CryptoOps {
+            pub(crate) fn into_inner(self) -> CryptoOps {
                 self.0
             }
         }

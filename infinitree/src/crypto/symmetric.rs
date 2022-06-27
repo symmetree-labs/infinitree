@@ -4,7 +4,7 @@ use crate::{
     ObjectId,
 };
 use ring::aead;
-use secrecy::{ExposeSecret, Secret};
+use secrecy::{ExposeSecret, SecretString};
 use std::{mem::size_of, sync::Arc};
 
 type Nonce = [u8; 12];
@@ -50,10 +50,7 @@ impl TryFrom<u8> for Mode {
 }
 
 impl UsernamePassword {
-    pub fn from_credentials(
-        username: Secret<String>,
-        password: Secret<String>,
-    ) -> Result<Arc<Self>> {
+    pub fn with_credentials(username: SecretString, password: SecretString) -> Result<Arc<Self>> {
         let random = SystemRandom::new();
         derive_argon2(
             b"",
@@ -222,6 +219,13 @@ impl CryptoScheme for Symmetric {
         )?)))
     }
 
+    fn storage_key(&self) -> Result<StorageKey> {
+        Ok(StorageKey::new(SymmetricOps(derive_subkey(
+            &self.convergence_key,
+            "zerostash.com 2022 storage key",
+        )?)))
+    }
+
     fn expose_convergence_key(&self) -> Option<RawKey> {
         Some(self.convergence_key.clone())
     }
@@ -254,7 +258,7 @@ impl CryptoScheme for MixedScheme {
 }
 
 #[derive(Clone)]
-pub struct SymmetricOps(RawKey);
+pub struct SymmetricOps(pub(crate) RawKey);
 
 impl ICryptoOps for SymmetricOps {
     #[inline]
@@ -265,12 +269,12 @@ impl ICryptoOps for SymmetricOps {
         key: &Digest,
         data: &mut [u8],
     ) -> ChunkPointer {
-        let aead = get_aead((*hash).into());
+        let aead = get_aead((*key).into());
 
         let ring_tag = aead
             .seal_in_place_separate_tag(
                 aead::Nonce::assume_unique_for_key(Nonce::default()),
-                aead::Aad::from(&file),
+                aead::Aad::from(&object),
                 data,
             )
             .unwrap();
@@ -406,7 +410,7 @@ mod test {
 
     #[test]
     fn userpass_encrypt_decrypt() {
-        let seal_key = UsernamePassword::from_credentials(
+        let seal_key = UsernamePassword::with_credentials(
             "test".to_string().into(),
             "test".to_string().into(),
         )
@@ -419,7 +423,7 @@ mod test {
         };
         let header = ct.key.clone().seal_root(ct.clone()).unwrap();
 
-        let open_key = UsernamePassword::from_credentials(
+        let open_key = UsernamePassword::with_credentials(
             "test".to_string().into(),
             "test".to_string().into(),
         )
@@ -439,7 +443,7 @@ mod test {
 
     #[test]
     fn userpass_backwards_compat_root_address() {
-        let userpass = UsernamePassword::from_credentials(
+        let userpass = UsernamePassword::with_credentials(
             "test".to_string().into(),
             "test".to_string().into(),
         )
@@ -490,7 +494,7 @@ mod test {
             8, 198,
         ]);
 
-        let open_key = UsernamePassword::from_credentials(
+        let open_key = UsernamePassword::with_credentials(
             "test".to_string().into(),
             "test".to_string().into(),
         )
@@ -507,7 +511,7 @@ mod test {
         // we want to avoid re-using the same algo on sealing
         assert_ne!(sealed, TEST_08_SEALED_HEADER);
 
-        let open_key = UsernamePassword::from_credentials(
+        let open_key = UsernamePassword::with_credentials(
             "test".to_string().into(),
             "test".to_string().into(),
         )

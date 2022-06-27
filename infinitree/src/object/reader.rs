@@ -32,7 +32,7 @@ impl AEADReader {
     pub fn new(backend: Arc<dyn Backend>, crypto: ChunkKey) -> Self {
         AEADReader {
             backend,
-            crypto: crypto.unwrap(),
+            crypto: crypto.into_inner(),
             buffer: BlockBuffer::default(),
             get_object_id: default_object_getter(),
         }
@@ -41,7 +41,7 @@ impl AEADReader {
     pub(crate) fn for_storage(backend: Arc<dyn Backend>, crypto: StorageKey) -> Self {
         AEADReader {
             backend,
-            crypto: crypto.unwrap(),
+            crypto: crypto.into_inner(),
             buffer: BlockBuffer::default(),
             get_object_id: default_object_getter(),
         }
@@ -50,7 +50,7 @@ impl AEADReader {
     pub(crate) fn for_root(backend: Arc<dyn Backend>, crypto: IndexKey) -> Self {
         AEADReader {
             backend,
-            crypto: crypto.unwrap(),
+            crypto: crypto.into_inner(),
             buffer: BlockBuffer::default(),
             get_object_id: default_object_getter(),
         }

@@ -143,10 +143,10 @@ impl<R: Reader> Read for BufferedStream<R> {
 ///
 /// let mut tree = Infinitree::<infinitree::fields::VersionedMap<String, Stream>>::empty(
 ///     InMemoryBackend::shared(),
-///     UsernamePassword::from_credentials("username".to_string().into(), "password".to_string().into()).unwrap()
+///     UsernamePassword::with_credentials("username".to_string().into(), "password".to_string().into()).unwrap()
 /// ).unwrap();
 ///
-/// let mut sink = BufferedSink::new(tree.chunk_writer().unwrap());
+/// let mut sink = BufferedSink::new(tree.storage_writer().unwrap());
 ///
 /// sink.write(b"it's going in the sink");
 /// tree.index().insert("message_1".to_string(), sink.finish().unwrap());
@@ -291,7 +291,7 @@ mod tests {
         use crate::{backends::test::InMemoryBackend, crypto::CryptoScheme, UsernamePassword};
         use std::io::{Read, Write};
 
-        let key = UsernamePassword::from_credentials(
+        let key = UsernamePassword::with_credentials(
             "asdf".to_string().into(),
             "fdsa".to_string().into(),
         )

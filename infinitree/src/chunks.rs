@@ -94,7 +94,7 @@ impl<const N: usize> From<RawChunkPointer> for [u8; N] {
 
 /// A pointer for a chunk of data in the object system.
 ///
-/// A `ChunkPointer`, in addition to a [`Key`][crate::Key] is required
+/// A `ChunkPointer`, in addition to a [`KeySource`][crate::KeySource] is required
 /// to access most data that's outside the index system.
 ///
 /// # Examples

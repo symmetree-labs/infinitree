@@ -630,7 +630,7 @@ mod test {
     #[test]
     fn bare_index_can_be_restored() {
         let key = || {
-            UsernamePassword::from_credentials(
+            UsernamePassword::with_credentials(
                 "bare_index_map".to_string().into(),
                 "password".to_string().into(),
             )

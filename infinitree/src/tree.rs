@@ -83,7 +83,7 @@ where
     ///
     /// let mut tree = Infinitree::<Measurements>::empty(
     ///     Directory::new("/storage").unwrap(),
-    ///     UsernamePassword::from_credentials("username".to_string().into(),
+    ///     UsernamePassword::with_credentials("username".to_string().into(),
     ///                                        "password".to_string().into()).unwrap()
     /// ).unwrap();
     /// ```
@@ -133,7 +133,7 @@ where
     ///
     /// let mut tree = Infinitree::<infinitree::fields::VersionedMap<String, String>>::empty(
     ///     Directory::new("/storage").unwrap(),
-    ///     UsernamePassword::from_credentials("username".to_string().into(), "password".to_string().into()).unwrap()
+    ///     UsernamePassword::with_credentials("username".to_string().into(), "password".to_string().into()).unwrap()
     /// ).unwrap();
     ///
     /// // Commit message can be omitted using `None`
@@ -393,7 +393,7 @@ where
     /// The object reader is for reading out those [`ChunkPointer`][crate::ChunkPointer]s
     /// that you get when using an [`AEADWriter`] stack manually.
     ///
-    /// You can obtain an [`AEADWriter`] using [`object_writer`][Self::chunk_writer].
+    /// You can obtain an [`AEADWriter`] using [`object_writer`][Self::storage_writer].
     pub fn storage_reader(&self) -> Result<PoolRef<AEADReader>> {
         Ok(PoolRef::without_pool(AEADReader::for_storage(
             self.backend(),
