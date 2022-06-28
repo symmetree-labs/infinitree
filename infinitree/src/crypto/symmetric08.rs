@@ -1,5 +1,5 @@
 use super::*;
-use crate::{chunks::RawChunkPointer, ObjectId};
+use crate::{chunks::*, ObjectId};
 use ring::aead;
 use secrecy::{ExposeSecret, SecretString};
 use std::{mem::size_of, sync::Arc};
