@@ -1,7 +1,7 @@
 use super::*;
 use crate::{chunks::RawChunkPointer, ObjectId};
 use ring::aead;
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 use std::{mem::size_of, sync::Arc};
 
 type Nonce = [u8; 12];
@@ -15,8 +15,8 @@ const HEADER_PAYLOAD: usize = size_of::<SealedHeader>() - size_of::<Tag>();
 
 impl Key {
     pub(crate) fn from_credentials(
-        username: Secret<String>,
-        password: Secret<String>,
+        username: SecretString,
+        password: SecretString,
     ) -> Result<KeySource> {
         let master_key = derive_argon2(
             b"",
@@ -281,14 +281,13 @@ mod test {
     fn test_chunk_encryption() {
         use super::{ICryptoOps, ObjectOperations};
         use crate::object::WriteObject;
-        use secrecy::Secret;
         use std::io::Write;
 
-        let key = Secret::new(*b"abcdef1234567890abcdef1234567890");
+        let key = *b"abcdef1234567890abcdef1234567890";
         let hash = b"1234567890abcdef1234567890abcdef";
         let cleartext = b"the quick brown fox jumps ";
         let size = cleartext.len();
-        let crypto = ObjectOperations::chunks(key);
+        let crypto = ObjectOperations::chunks(key.into());
         let mut obj = WriteObject::default();
 
         let mut encrypted = cleartext.clone();

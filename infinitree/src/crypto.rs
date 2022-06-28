@@ -12,32 +12,29 @@ use crate::{chunks::RawChunkPointer, object::ObjectId, ChunkPointer};
 pub use blake3::Hasher;
 use ring::aead;
 pub use ring::rand::{SecureRandom, SystemRandom};
-use secrecy::{ExposeSecret, Secret, Zeroize};
+use secrecy::{ExposeSecret, Zeroize};
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
 };
 use thiserror::Error;
 
+mod rawkey;
+use rawkey::*;
 pub(crate) mod symmetric;
 pub use symmetric::UsernamePassword;
 pub(crate) mod symmetric08;
 
 #[cfg(feature = "cryptobox")]
-pub(crate) mod symmetric_cryptobox_storage;
-#[cfg(feature = "cryptobox")]
-pub use symmetric_cryptobox_storage::CryptoBoxStorage;
+pub mod symmetric_cryptobox_storage;
 
 const HEADER_SIZE: usize = 512;
 const CRYPTO_DIGEST_SIZE: usize = 32;
 
-/// A cryptographic key
-pub type RawKey = Secret<[u8; CRYPTO_DIGEST_SIZE]>;
-
 pub mod public {
     #[cfg(feature = "cryptobox")]
-    pub use super::CryptoBoxStorage;
-    pub use super::{Digest, Hasher, IKeySource, KeySource, RawKey, UsernamePassword};
+    pub use super::symmetric_cryptobox_storage as crypto_box;
+    pub use super::{rawkey::RawKey, Digest, Hasher, IKeySource, KeySource, UsernamePassword};
 }
 
 // TODO: ideally this should be a tuple struct wrapping blake3::Hash,
@@ -64,6 +61,11 @@ pub(crate) type CryptoOps = Arc<dyn ICryptoOps>;
 
 #[derive(Error, Debug)]
 pub enum CryptoError {
+    #[error("Parse error: {source}")]
+    ParseError {
+        #[from]
+        source: hex::FromHexError,
+    },
     #[error("Key error: {source}")]
     KeyError {
         #[from]
@@ -243,12 +245,12 @@ fn derive_argon2(secret: &[u8], salt_raw: &[u8], password: &[u8]) -> Result<RawK
     outbuf.copy_from_slice(&result);
     result.zeroize();
 
-    Ok(Secret::new(outbuf))
+    Ok(outbuf.into())
 }
 
 fn derive_subkey(key: &RawKey, ctx: &str) -> Result<RawKey> {
     let outbuf = blake3::derive_key(ctx, key.expose_secret());
-    Ok(Secret::new(outbuf))
+    Ok(outbuf.into())
 }
 
 fn generate_key(rand: &impl SecureRandom) -> Result<RawKey> {

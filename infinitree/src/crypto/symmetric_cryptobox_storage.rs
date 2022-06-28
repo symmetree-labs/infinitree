@@ -1,3 +1,6 @@
+//! Asymmetric cryptography based encryption scheme for write-only
+//! trees.
+
 use super::*;
 use crate::{
     chunks::{ChunkPointer, RawChunkPointer},
@@ -11,12 +14,29 @@ use libsodium_sys::{
 use secrecy::{ExposeSecret, SecretString};
 use std::sync::Arc;
 
-struct CryptoBoxKeys {
-    pk: RawKey,
-    sk: Option<RawKey>,
+/// A key pair for crypto_box-based schemes.
+pub struct Keypair {
+    pub public_key: RawKey,
+    pub secret_key: RawKey,
 }
 
-struct CryptoBoxOps(CryptoOps, Arc<CryptoBoxKeys>);
+impl Keypair {
+    /// Generate a new key pair.
+    pub fn generate() -> Result<Self> {
+        let mut pk = [0u8; crypto_box_PUBLICKEYBYTES as usize];
+        let mut sk = [0u8; crypto_box_SECRETKEYBYTES as usize];
+
+        let ok = unsafe { crypto_box_keypair(pk.as_mut_ptr(), sk.as_mut_ptr()) };
+        if ok != 0 {
+            Err(CryptoError::Fatal)
+        } else {
+            Ok(Keypair {
+                public_key: pk.into(),
+                secret_key: sk.into(),
+            })
+        }
+    }
+}
 
 /// Asymmetric-key based encryption scheme to create archives with a
 /// write-only storage segment.
@@ -36,12 +56,18 @@ struct CryptoBoxOps(CryptoOps, Arc<CryptoBoxKeys>);
 /// existing [`ChunkPointer`]s would be invalidated, and would need
 /// re-encryption, converting to and from `CryptoBoxStorage` is not
 /// supported.
-pub struct CryptoBoxStorage {
+pub struct StorageOnly {
     inner: KeySource,
-    storage: Arc<CryptoBoxKeys>,
+    storage: Arc<InstanceKeys>,
 }
 
-impl CryptoBoxStorage {
+struct CryptoBoxOps(CryptoOps, Arc<InstanceKeys>);
+struct InstanceKeys {
+    pk: RawKey,
+    sk: Option<RawKey>,
+}
+
+impl StorageOnly {
     /// Create a crypto backend that only allows encryption through
     /// [`Infinitree::storage_writer`](crate::Infinitree::storage_writer).
     ///
@@ -52,9 +78,9 @@ impl CryptoBoxStorage {
         password: SecretString,
         public_key: RawKey,
     ) -> Result<Arc<Self>> {
-        Ok(CryptoBoxStorage {
+        Ok(StorageOnly {
             inner: UsernamePassword::with_credentials(username, password)?,
-            storage: Arc::new(CryptoBoxKeys {
+            storage: Arc::new(InstanceKeys {
                 pk: public_key,
                 sk: None,
             }),
@@ -69,14 +95,14 @@ impl CryptoBoxStorage {
     /// [`Infinitree::storage_reader`](crate::Infinitree::storage_reader),
     /// respectively.
     pub fn with_secret_key(
-        username: Secret<String>,
-        password: Secret<String>,
+        username: SecretString,
+        password: SecretString,
         public_key: RawKey,
         secret_key: RawKey,
     ) -> Result<Arc<Self>> {
-        Ok(CryptoBoxStorage {
+        Ok(StorageOnly {
             inner: UsernamePassword::with_credentials(username, password)?,
-            storage: Arc::new(CryptoBoxKeys {
+            storage: Arc::new(InstanceKeys {
                 pk: public_key,
                 sk: Some(secret_key),
             }),
@@ -85,14 +111,14 @@ impl CryptoBoxStorage {
     }
 }
 
-impl CryptoScheme for CryptoBoxStorage {
+impl CryptoScheme for StorageOnly {
     fn root_object_id(&self) -> Result<ObjectId> {
         self.inner.root_object_id()
     }
 
     fn open_root(self: Arc<Self>, header: SealedHeader) -> Result<CleartextHeader> {
         let mut ch = self.inner.clone().open_root(header)?;
-        ch.key = Arc::new(CryptoBoxStorage {
+        ch.key = Arc::new(StorageOnly {
             inner: ch.key,
             storage: self.storage.clone(),
         });
@@ -218,7 +244,7 @@ mod test {
     use crate::crypto::{CryptoOps, CryptoScheme};
     use std::sync::Arc;
 
-    use super::CryptoBoxKeys;
+    use super::InstanceKeys;
 
     const SECRET_KEY: [u8; super::crypto_box_SECRETKEYBYTES as usize] = [
         170, 208, 130, 31, 146, 57, 220, 53, 221, 144, 235, 118, 173, 221, 77, 207, 9, 46, 71, 68,
@@ -249,7 +275,7 @@ mod test {
         assert_eq!(&decrypted[..SIZE], CLEARTEXT);
     }
 
-    fn encrypt_decrypt_with_instance(keys: CryptoBoxKeys) {
+    fn encrypt_decrypt_with_instance(keys: InstanceKeys) {
         use super::{super::symmetric::SymmetricOps, CryptoBoxOps};
 
         let symmetric = SymmetricOps(SYMMETRIC_KEY.into());
@@ -260,7 +286,7 @@ mod test {
 
     #[test]
     fn test_chunk_encryption() {
-        encrypt_decrypt_with_instance(CryptoBoxKeys {
+        encrypt_decrypt_with_instance(InstanceKeys {
             pk: PUBLIC_KEY.into(),
             sk: Some(SECRET_KEY.into()),
         });
@@ -269,7 +295,7 @@ mod test {
     #[test]
     #[should_panic(expected = "No private key specified, can't decrypt data!")]
     fn without_secret_key_decrypt_panics() {
-        encrypt_decrypt_with_instance(CryptoBoxKeys {
+        encrypt_decrypt_with_instance(InstanceKeys {
             pk: PUBLIC_KEY.into(),
             sk: None,
         });
@@ -277,7 +303,7 @@ mod test {
 
     #[test]
     fn keysource_with_secret_key() {
-        let scheme = super::CryptoBoxStorage::with_secret_key(
+        let scheme = super::StorageOnly::with_secret_key(
             "user".to_string().into(),
             "pass".to_string().into(),
             PUBLIC_KEY.into(),
@@ -291,7 +317,7 @@ mod test {
     #[test]
     #[should_panic(expected = "No private key specified, can't decrypt data!")]
     fn keysource_encrypt_only() {
-        let scheme = super::CryptoBoxStorage::encrypt_only(
+        let scheme = super::StorageOnly::encrypt_only(
             "user".to_string().into(),
             "pass".to_string().into(),
             PUBLIC_KEY.into(),

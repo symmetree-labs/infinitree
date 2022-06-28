@@ -11,8 +11,8 @@ type Nonce = [u8; 12];
 
 pub struct UsernamePassword {
     inner: Symmetric,
-    username: Secret<String>,
-    password: Secret<String>,
+    username: SecretString,
+    password: SecretString,
 }
 
 pub struct Symmetric {
@@ -525,14 +525,13 @@ mod test {
     fn test_chunk_encryption() {
         use super::{ICryptoOps, SymmetricOps};
         use crate::object::WriteObject;
-        use secrecy::Secret;
         use std::io::Write;
 
-        let key = Secret::new(*b"abcdef1234567890abcdef1234567890");
+        let key = *b"abcdef1234567890abcdef1234567890";
         let hash = b"1234567890abcdef1234567890abcdef";
         let cleartext = b"the quick brown fox jumps ";
         let size = cleartext.len();
-        let crypto = SymmetricOps(key);
+        let crypto = SymmetricOps(key.into());
         let mut obj = WriteObject::default();
 
         let mut encrypted = cleartext.clone();

@@ -226,11 +226,10 @@ pub(crate) mod test {
         mut load: S,
     ) -> () {
         use crate::{backends, crypto, object::AEADWriter};
-        use secrecy::Secret;
         use std::sync::Arc;
 
-        let key = Secret::new(*b"abcdef1234567890abcdef1234567890");
-        let crypto = crypto::symmetric08::ObjectOperations::chunks(key);
+        let key = *b"abcdef1234567890abcdef1234567890";
+        let crypto = crypto::symmetric08::ObjectOperations::chunks(key.into());
         let storage = Arc::new(backends::test::InMemoryBackend::default());
 
         let writer = || AEADWriter::new(storage.clone(), crypto::ChunkKey::new(crypto.clone()));
