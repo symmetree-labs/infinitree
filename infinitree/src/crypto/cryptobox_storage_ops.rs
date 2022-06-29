@@ -71,8 +71,10 @@ impl StorageOnly {
     /// Create a crypto backend that only allows encryption through
     /// [`Infinitree::storage_writer`](crate::Infinitree::storage_writer).
     ///
-    /// Note that the resulting encryption backend WILL PANIC if
-    /// decryption operation is done through `Infinitree::storage_reader`.
+    /// # Panics
+    ///
+    /// The resulting encryption backend will panic if decryption
+    /// operation is done through `Infinitree::storage_reader`.
     pub fn encrypt_only(
         username: SecretString,
         password: SecretString,

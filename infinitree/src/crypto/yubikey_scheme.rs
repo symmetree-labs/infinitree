@@ -1,3 +1,9 @@
+//! Use a Yubikey to secure trees.
+//!
+//! This module re-exports the [`yubico_manager`] library, which
+//! provides all the utilities to program a Yubikey.
+//!
+//! See the documentation for [`YubikeyCR`] for additional details.
 use super::{
     symmetric::{Mode, Symmetric},
     *,
@@ -18,6 +24,27 @@ const HEADER_PAYLOAD: usize =
 const HEADER_CYPHERTEXT: usize =
     size_of::<SealedHeader>() - size_of::<Nonce>() - size_of::<Challenge>();
 
+/// This mode's behaviour is equivalent to the
+/// [`UsernamePassword`](crate::keys::UsernamePassword) `KeySource`, but
+/// adds a second factor.
+///
+/// ## Touch-to-sign configuration
+///
+/// In case you configure your Yubikey to
+/// require a touch authorization for HMAC operations, you will need
+/// to touch the Yubikey on both decrypt *and* encrypt operations.
+///
+/// If you are looking to secure a long-running job, or a background
+/// process that periodically commits changes, this will probably not
+/// be an optimal configuration for you.
+///
+/// ## Implementation details
+///
+/// The 512-byte binary header layout looks like so:
+///
+/// ```text
+/// encrypt(root[88] || mode[1] || convergence_key[32] || 0[..]) || mac[16] || nonce[12] || yubikey_challenge[64]
+/// ```
 pub struct YubikeyCR {
     inner: KeySource,
     master_key: RawKey,
@@ -51,36 +78,20 @@ fn seal_header(
     header: CleartextHeader,
     ykconfig: yubico_manager::config::Config,
 ) -> Result<SealedHeader> {
+    let mut output = SealedHeader::default();
     let random = SystemRandom::new();
     let nonce = {
         let mut buf = Nonce::default();
         random.fill(&mut buf)?;
         aead::Nonce::assume_unique_for_key(buf)
     };
-
     let challenge = {
         let mut buf = [0; size_of::<Challenge>()];
         random.fill(&mut buf)?;
         buf
     };
 
-    let mut output = SealedHeader::default();
-    let mut pos = header.root_ptr.write_to(&mut output);
-
-    //
-    // mark the mode
-    output[pos] = mode as u8;
-    pos += 1;
-
-    //
-    // write out the convergence key
-    let convergence_key = header
-        .key
-        .expose_convergence_key()
-        .ok_or(CryptoError::Fatal)?;
-    let key = convergence_key.expose_secret();
-    output[pos..pos + key.len()].copy_from_slice(key);
-    pos += key.len();
+    let pos = mode.encode_root_to(&mut output, &header)?;
     debug_assert!(pos <= HEADER_CYPHERTEXT);
 
     //

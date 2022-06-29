@@ -28,11 +28,16 @@ pub mod yubikey_scheme;
 const CRYPTO_DIGEST_SIZE: usize = 32;
 
 pub mod public {
-    #[cfg(feature = "cryptobox")]
-    pub use super::cryptobox_storage_ops as crypto_box;
-    #[cfg(feature = "yubikey")]
-    pub use super::yubikey_scheme as yubikey;
-    pub use super::{rawkey::RawKey, Digest, Hasher, IKeySource, KeySource, UsernamePassword};
+    pub mod keys {
+        //! Encryption schemes and modes.
+
+        #[cfg(feature = "cryptobox")]
+        pub use super::super::cryptobox_storage_ops as crypto_box;
+        #[cfg(feature = "yubikey")]
+        pub use super::super::yubikey_scheme as yubikey;
+
+        pub use super::super::{rawkey::RawKey, Hasher, IKeySource, KeySource, UsernamePassword};
+    }
 }
 
 // TODO: ideally this should be a tuple struct wrapping blake3::Hash,

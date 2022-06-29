@@ -624,7 +624,8 @@ mod test {
     use crate::{
         fields::{LocalField, SparseField, Strategy},
         index::test::store_then_load,
-        Infinitree, UsernamePassword,
+        keys::UsernamePassword,
+        Infinitree,
     };
 
     #[test]

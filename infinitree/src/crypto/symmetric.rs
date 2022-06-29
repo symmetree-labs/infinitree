@@ -1,3 +1,6 @@
+//! Use a username/password combination to locate and unlock trees.
+//!
+//! See the documentation for [`UsernamePassword`] for additional details.
 use super::*;
 use crate::{chunks::*, ObjectId};
 use ring::aead;
@@ -6,6 +9,24 @@ use std::{mem::size_of, sync::Arc};
 
 type Nonce = [u8; 12];
 
+/// Use a combination of username/password to locate and unlock a
+/// tree.
+///
+/// Note that all keys that are directly used to secure the tree's
+/// contents are derived from a convergence key, which is stored in
+/// the encrypted header.
+///
+/// The username/password combination can be therefore changed
+/// freely. Changing the username and/or password will always result
+/// in a new root object id.
+///
+/// ## Implementation details
+///
+/// The 512-byte binary header layout looks like so:
+///
+/// ```text
+/// encrypt(root[88] || mode[1] || convergence_key[32] || 0[..]) || mac[16] || nonce[12]
+/// ```
 pub struct UsernamePassword {
     inner: Symmetric,
     username: SecretString,
@@ -47,7 +68,7 @@ impl TryFrom<u8> for Mode {
 }
 
 impl Mode {
-    pub(crate) fn keysource(&self, master_key: RawKey, convergence_key: RawKey) -> KeySource {
+    pub(super) fn keysource(&self, master_key: RawKey, convergence_key: RawKey) -> KeySource {
         match self {
             Mode::Symmetric => Arc::new(Symmetric {
                 master_key,
@@ -58,6 +79,31 @@ impl Mode {
                 ops: super::symmetric08::Key::with_key(convergence_key),
             }),
         }
+    }
+
+    pub(super) fn encode_root_to(
+        &self,
+        output: &mut SealedHeader,
+        header: &CleartextHeader,
+    ) -> Result<usize> {
+        let mut pos = header.root_ptr.write_to(output);
+
+        //
+        // mark the mode to be New Symmetric.
+        output[pos] = *self as u8;
+        pos += 1;
+
+        //
+        // write out the convergence key
+        let convergence_key = header
+            .key
+            .expose_convergence_key()
+            .ok_or(CryptoError::Fatal)?;
+
+        let key = convergence_key.expose_secret();
+        output[pos..pos + key.len()].copy_from_slice(key);
+        pos += key.len();
+        Ok(pos)
     }
 }
 
@@ -93,29 +139,15 @@ fn root_object_id(master_key: &RawKey) -> Result<ObjectId> {
 }
 
 fn seal_header(master_key: &RawKey, mode: Mode, header: CleartextHeader) -> Result<SealedHeader> {
+    let mut output = SealedHeader::default();
     let random = SystemRandom::new();
     let nonce = {
         let mut buf = Nonce::default();
         random.fill(&mut buf)?;
         aead::Nonce::assume_unique_for_key(buf)
     };
-    let mut output = SealedHeader::default();
-    let mut pos = header.root_ptr.write_to(&mut output);
 
-    //
-    // mark the mode to be New Symmetric.
-    output[pos] = mode as u8;
-    pos += 1;
-
-    //
-    // write out the convergence key
-    let convergence_key = header
-        .key
-        .expose_convergence_key()
-        .ok_or(CryptoError::Fatal)?;
-    let key = convergence_key.expose_secret();
-    output[pos..pos + key.len()].copy_from_slice(key);
-    pos += key.len();
+    let pos = mode.encode_root_to(&mut output, &header)?;
     debug_assert!(pos <= HEADER_CYPHERTEXT);
 
     // Copy the n-once before it gets eaten by the aead.

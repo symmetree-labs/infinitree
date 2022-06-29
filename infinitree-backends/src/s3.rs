@@ -253,7 +253,7 @@ mod test {
     use crate::test::{write_and_wait_for_commit, TEST_DATA_DIR};
     use hyper::service::make_service_fn;
     use hyper::Server;
-    use infinitree::{object::WriteObject, Backend, ObjectId};
+    use infinitree::{backends::Backend, object::WriteObject, ObjectId};
     use s3_server::{storages::fs::FileSystem, S3Service, SimpleAuth};
     use std::{
         future,

@@ -249,7 +249,9 @@ impl From<DirEntry> for FileAccess {
 mod test {
     use super::Cache;
     use crate::test::{write_and_wait_for_commit, TEST_DATA_DIR};
-    use infinitree::{backends::test::InMemoryBackend, object::WriteObject, Backend, ObjectId};
+    use infinitree::{
+        backends::test::InMemoryBackend, backends::Backend, object::WriteObject, ObjectId,
+    };
     use std::{env, num::NonZeroUsize, path::Path};
 
     #[test]

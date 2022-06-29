@@ -37,7 +37,7 @@ pub(crate) fn block_on<O>(fut: impl Future<Output = O>) -> O {
 
 #[cfg(test)]
 mod test {
-    use infinitree::{object::WriteObject, Backend};
+    use infinitree::{backends::Backend, object::WriteObject};
 
     pub(crate) const TEST_DATA_DIR: &'static str = "../test_data";
 

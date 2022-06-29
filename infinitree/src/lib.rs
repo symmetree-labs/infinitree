@@ -40,10 +40,8 @@
 //!
 //! ```
 //! use infinitree::{
-//!     Infinitree,
-//!     Index,
-//!     UsernamePassword,
-//!     anyhow,
+//!     *,
+//!     keys::UsernamePassword,
 //!     backends::Directory,
 //!     fields::{VersionedMap},
 //! };
@@ -187,17 +185,17 @@ pub mod index;
 pub mod object;
 pub mod tree;
 
-pub use backends::Backend;
+pub use anyhow;
 pub use chunks::ChunkPointer;
 pub use crypto::public::*;
-pub use id::Id;
+pub use crypto::{Digest, Hasher};
 pub use index::Index;
+pub use infinitree_macros::Index;
 pub use object::ObjectId;
 pub use tree::Infinitree;
 
-pub use anyhow;
-
-pub use infinitree_macros::Index;
+pub(crate) use backends::Backend;
+pub(crate) use id::Id;
 
 use rmp_serde::decode::from_slice as deserialize_from_slice;
 use rmp_serde::encode::write as serialize_to_writer;

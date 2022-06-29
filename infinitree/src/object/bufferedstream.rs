@@ -139,7 +139,7 @@ impl<R: Reader> Read for BufferedStream<R> {
 ///
 /// ```
 /// use std::io::Write;
-/// use infinitree::{Infinitree, UsernamePassword, fields::Serialized, backends::test::InMemoryBackend, object::{BufferedSink, Stream}};
+/// use infinitree::{*, keys::UsernamePassword, fields::Serialized, backends::test::InMemoryBackend, object::{Stream, BufferedSink}};
 ///
 /// let mut tree = Infinitree::<infinitree::fields::VersionedMap<String, Stream>>::empty(
 ///     InMemoryBackend::shared(),
@@ -288,7 +288,9 @@ mod tests {
             super::{AEADReader, AEADWriter},
             BufferedSink,
         };
-        use crate::{backends::test::InMemoryBackend, crypto::CryptoScheme, UsernamePassword};
+        use crate::{
+            backends::test::InMemoryBackend, crypto::CryptoScheme, keys::UsernamePassword,
+        };
         use std::io::{Read, Write};
 
         let key = UsernamePassword::with_credentials(
