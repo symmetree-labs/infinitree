@@ -1,13 +1,3 @@
-//     /// Yubikey challenge-response authentication
-//     /// Derive the root object id from the username/password pair, and
-//     /// mix the Yubikey HMAC response into the encryption key derivation.
-//     ///
-//     /// On every write the root encryption key will change, and the
-//     /// 20-byte challenge is written to the root object header
-//     /// unencrypted.
-//     YubikeyCR { user: String, password: String },
-// }
-
 pub use blake3::Hasher;
 use ring::aead;
 pub use ring::rand::{SecureRandom, SystemRandom};
@@ -32,11 +22,16 @@ pub mod symmetric08;
 #[cfg(feature = "cryptobox")]
 pub mod cryptobox_storage_ops;
 
+#[cfg(feature = "yubikey")]
+pub mod yubikey_scheme;
+
 const CRYPTO_DIGEST_SIZE: usize = 32;
 
 pub mod public {
     #[cfg(feature = "cryptobox")]
     pub use super::cryptobox_storage_ops as crypto_box;
+    #[cfg(feature = "yubikey")]
+    pub use super::yubikey_scheme as yubikey;
     pub use super::{rawkey::RawKey, Digest, Hasher, IKeySource, KeySource, UsernamePassword};
 }
 

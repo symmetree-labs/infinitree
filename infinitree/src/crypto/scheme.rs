@@ -18,9 +18,7 @@ pub trait CryptoScheme {
 
     fn chunk_key(&self) -> Result<ChunkKey>;
     fn index_key(&self) -> Result<IndexKey>;
-    fn storage_key(&self) -> Result<StorageKey> {
-        self.chunk_key().map(|ck| StorageKey(ck.0))
-    }
+    fn storage_key(&self) -> Result<StorageKey>;
 
     fn expose_convergence_key(&self) -> Option<RawKey>;
 }

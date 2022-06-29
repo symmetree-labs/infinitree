@@ -81,6 +81,10 @@ impl CryptoScheme for Key {
             .map(super::IndexKey::new)
     }
 
+    fn storage_key(&self) -> Result<StorageKey> {
+        self.chunk_key().map(|ck| StorageKey(ck.0))
+    }
+
     fn expose_convergence_key(&self) -> Option<RawKey> {
         Some(self.master_key.clone())
     }

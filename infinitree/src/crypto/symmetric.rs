@@ -1,8 +1,5 @@
 use super::*;
-use crate::{
-    chunks::{ChunkPointer, RawChunkPointer},
-    ObjectId,
-};
+use crate::{chunks::*, ObjectId};
 use ring::aead;
 use secrecy::{ExposeSecret, SecretString};
 use std::{mem::size_of, sync::Arc};
@@ -16,8 +13,8 @@ pub struct UsernamePassword {
 }
 
 pub struct Symmetric {
-    master_key: RawKey,
-    convergence_key: RawKey,
+    pub(super) master_key: RawKey,
+    pub(super) convergence_key: RawKey,
 }
 
 pub struct MixedScheme {
@@ -30,7 +27,7 @@ const HEADER_PAYLOAD: usize = size_of::<SealedHeader>() - size_of::<Tag>() - siz
 const HEADER_CYPHERTEXT: usize = size_of::<SealedHeader>() - size_of::<Nonce>();
 
 #[derive(Copy, Clone)]
-enum Mode {
+pub(super) enum Mode {
     Mixed08 = 0,
     Symmetric = 1,
 }
@@ -45,6 +42,21 @@ impl TryFrom<u8> for Mode {
             0 => Ok(Mixed08),
             1 => Ok(Symmetric),
             _ => Err(CryptoError::Fatal),
+        }
+    }
+}
+
+impl Mode {
+    pub(crate) fn keysource(&self, master_key: RawKey, convergence_key: RawKey) -> KeySource {
+        match self {
+            Mode::Symmetric => Arc::new(Symmetric {
+                master_key,
+                convergence_key,
+            }),
+            Mode::Mixed08 => Arc::new(MixedScheme {
+                master_key,
+                ops: super::symmetric08::Key::with_key(convergence_key),
+            }),
         }
     }
 }
@@ -90,17 +102,21 @@ fn seal_header(master_key: &RawKey, mode: Mode, header: CleartextHeader) -> Resu
     let mut output = SealedHeader::default();
     let mut pos = header.root_ptr.write_to(&mut output);
 
+    //
     // mark the mode to be New Symmetric.
     output[pos] = mode as u8;
-
-    // write out the convergence key
     pos += 1;
+
+    //
+    // write out the convergence key
     let convergence_key = header
         .key
         .expose_convergence_key()
         .ok_or(CryptoError::Fatal)?;
     let key = convergence_key.expose_secret();
     output[pos..pos + key.len()].copy_from_slice(key);
+    pos += key.len();
+    debug_assert!(pos <= HEADER_CYPHERTEXT);
 
     // Copy the n-once before it gets eaten by the aead.
     output[HEADER_CYPHERTEXT..].copy_from_slice(nonce.as_ref());
@@ -135,18 +151,7 @@ fn open_header(master_key: &RawKey, mut sealed: SealedHeader) -> Result<Cleartex
         RawKey::new(buf)
     };
 
-    let key: KeySource = match Mode::try_from(mode) {
-        Ok(Mode::Symmetric) => Arc::new(Symmetric {
-            master_key: master_key.clone(),
-            convergence_key,
-        }),
-        Ok(Mode::Mixed08) => Arc::new(MixedScheme {
-            master_key: master_key.clone(),
-            ops: super::symmetric08::Key::with_key(convergence_key),
-        }),
-        Err(e) => return Err(e),
-    };
-
+    let key: KeySource = Mode::try_from(mode)?.keysource(master_key.clone(), convergence_key);
     Ok(CleartextHeader { root_ptr, key })
 }
 
@@ -185,6 +190,10 @@ impl CryptoScheme for UsernamePassword {
 
     fn index_key(&self) -> Result<IndexKey> {
         self.inner.index_key()
+    }
+
+    fn storage_key(&self) -> Result<StorageKey> {
+        self.inner.storage_key()
     }
 
     fn expose_convergence_key(&self) -> Option<RawKey> {
@@ -250,6 +259,10 @@ impl CryptoScheme for MixedScheme {
 
     fn index_key(&self) -> Result<IndexKey> {
         self.ops.index_key()
+    }
+
+    fn storage_key(&self) -> Result<StorageKey> {
+        self.chunk_key().map(|ck| StorageKey(ck.0))
     }
 
     fn expose_convergence_key(&self) -> Option<RawKey> {
