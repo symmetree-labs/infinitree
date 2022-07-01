@@ -265,7 +265,7 @@ where
     }
 
     /// Load into memory all fields for the selected version ranges
-    pub fn load_all(&mut self) -> Result<()> {
+    pub fn load_all(&self) -> Result<()> {
         self.index
             .write()
             .load_all_from(&self.filter_generations(), &self.reader_pool)

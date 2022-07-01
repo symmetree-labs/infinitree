@@ -653,8 +653,7 @@ mod test {
             tree.commit(None).unwrap();
         }
 
-        let mut tree =
-            Infinitree::<VersionedMap<usize, usize>>::open(storage.clone(), key()).unwrap();
+        let tree = Infinitree::<VersionedMap<usize, usize>>::open(storage.clone(), key()).unwrap();
         tree.load_all().unwrap();
 
         for i in 0..100 {

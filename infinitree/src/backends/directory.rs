@@ -114,9 +114,11 @@ impl Directory {
     }
 
     pub fn with_open_file_limit(target: impl AsRef<Path>, limit: usize) -> Result<Arc<Directory>> {
+        let absolute = target.as_ref().canonicalize()?;
+
         std::fs::create_dir_all(&target)?;
         Ok(Arc::new(Directory {
-            target: target.as_ref().into(),
+            target: absolute,
             read_lru: Arc::new(Mutex::new(LruCache::new(limit))),
         }))
     }
