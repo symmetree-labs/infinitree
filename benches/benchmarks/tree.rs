@@ -1,4 +1,6 @@
-use infinitree::{backends::test::InMemoryBackend, fields::Serialized, Index, Infinitree, Key};
+use infinitree::{
+    backends::test::InMemoryBackend, fields::Serialized, keys::UsernamePassword, Index, Infinitree,
+};
 
 use criterion::{criterion_group, Criterion};
 
@@ -13,7 +15,11 @@ fn empty_commit(c: &mut Criterion) {
     c.bench_function("commit empty in-memory", |b| {
         let mut tree = Infinitree::<Measurements>::empty(
             InMemoryBackend::shared(),
-            Key::from_credentials("username", "password").unwrap(),
+            UsernamePassword::with_credentials(
+                "username".to_string().into(),
+                "password".to_string().into(),
+            )
+            .unwrap(),
         )
         .unwrap();
 
@@ -29,7 +35,11 @@ fn empty_open(c: &mut Criterion) {
             let b = InMemoryBackend::shared();
             let mut tree = Infinitree::<Measurements>::empty(
                 b.clone(),
-                Key::from_credentials("username", "password").unwrap(),
+                UsernamePassword::with_credentials(
+                    "username".to_string().into(),
+                    "password".to_string().into(),
+                )
+                .unwrap(),
             )
             .unwrap();
             tree.commit("empty commit yay").unwrap();
@@ -40,7 +50,11 @@ fn empty_open(c: &mut Criterion) {
         b.iter(|| {
             let _ = Infinitree::<Measurements>::open(
                 backend.clone(),
-                Key::from_credentials("username", "password").unwrap(),
+                UsernamePassword::with_credentials(
+                    "username".to_string().into(),
+                    "password".to_string().into(),
+                )
+                .unwrap(),
             )
             .unwrap();
         });
@@ -51,7 +65,11 @@ fn load_1_value(c: &mut Criterion) {
     c.bench_function("load usize as index", |b| {
         let mut tree = Infinitree::<Measurements>::empty(
             InMemoryBackend::shared(),
-            Key::from_credentials("username", "password").unwrap(),
+            UsernamePassword::with_credentials(
+                "username".to_string().into(),
+                "password".to_string().into(),
+            )
+            .unwrap(),
         )
         .unwrap();
         tree.commit("empty commit yay").unwrap();
