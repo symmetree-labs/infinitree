@@ -125,6 +125,13 @@ impl UsernamePassword {
             password,
         }))
     }
+
+    pub fn generate_password() -> Result<String> {
+        let rand = ring::rand::SystemRandom::new();
+        let mut k = [0; 64];
+        rand.fill(&mut k)?;
+        Ok(hex::encode(&k))
+    }
 }
 
 fn root_key(master_key: &RawKey) -> Result<RawKey> {
