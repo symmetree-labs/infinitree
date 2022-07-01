@@ -288,9 +288,7 @@ mod tests {
             super::{AEADReader, AEADWriter},
             BufferedSink,
         };
-        use crate::{
-            backends::test::InMemoryBackend, crypto::CryptoScheme, keys::UsernamePassword,
-        };
+        use crate::{backends::test::InMemoryBackend, keys::UsernamePassword};
         use std::io::{Read, Write};
 
         let key = UsernamePassword::with_credentials(

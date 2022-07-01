@@ -79,15 +79,14 @@ impl StorageOnly {
         username: SecretString,
         password: SecretString,
         public_key: RawKey,
-    ) -> Result<Arc<Self>> {
-        Ok(StorageOnly {
+    ) -> Result<KeySource> {
+        Ok(Arc::new(StorageOnly {
             inner: UsernamePassword::with_credentials(username, password)?,
             storage: Arc::new(InstanceKeys {
                 pk: public_key,
                 sk: None,
             }),
-        }
-        .into())
+        }))
     }
 
     /// Create a crypto backend that allows encryption and decryption
@@ -96,20 +95,19 @@ impl StorageOnly {
     /// and
     /// [`Infinitree::storage_reader`](crate::Infinitree::storage_reader),
     /// respectively.
-    pub fn with_secret_key(
+    pub fn encrypt_and_decrypt(
         username: SecretString,
         password: SecretString,
         public_key: RawKey,
         secret_key: RawKey,
-    ) -> Result<Arc<Self>> {
-        Ok(StorageOnly {
+    ) -> Result<KeySource> {
+        Ok(Arc::new(StorageOnly {
             inner: UsernamePassword::with_credentials(username, password)?,
             storage: Arc::new(InstanceKeys {
                 pk: public_key,
                 sk: Some(secret_key),
             }),
-        }
-        .into())
+        }))
     }
 }
 
@@ -243,7 +241,7 @@ impl ICryptoOps for CryptoBoxOps {
 
 #[cfg(test)]
 mod test {
-    use crate::crypto::{CryptoOps, CryptoScheme};
+    use crate::crypto::CryptoOps;
     use std::sync::Arc;
 
     use super::InstanceKeys;
@@ -305,7 +303,7 @@ mod test {
 
     #[test]
     fn keysource_with_secret_key() {
-        let scheme = super::StorageOnly::with_secret_key(
+        let scheme = super::StorageOnly::encrypt_and_decrypt(
             "user".to_string().into(),
             "pass".to_string().into(),
             PUBLIC_KEY.into(),

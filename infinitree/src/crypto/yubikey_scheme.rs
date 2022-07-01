@@ -158,25 +158,23 @@ impl YubikeyCR {
         username: SecretString,
         password: SecretString,
         ykconfig: yubico_manager::config::Config,
-    ) -> Result<Arc<Self>> {
+    ) -> Result<KeySource> {
         let random = SystemRandom::new();
-        derive_argon2(
-            b"",
+        let master_key = derive_argon2(
+            b"zerostash.com yubikey cr master key",
             username.expose_secret().as_bytes(),
             password.expose_secret().as_bytes(),
-        )
-        .and_then(|master_key| {
-            Ok(YubikeyCR {
-                inner: Arc::new(Symmetric {
-                    master_key: master_key.clone(),
-                    convergence_key: generate_key(&random)?,
-                }),
-                master_key,
-                mode: Mode::Symmetric,
-                ykconfig,
-            }
-            .into())
-        })
+        )?;
+
+        Ok(Arc::new(YubikeyCR {
+            inner: Arc::new(Symmetric {
+                master_key: master_key.clone(),
+                convergence_key: generate_key(&random)?,
+            }),
+            master_key,
+            mode: Mode::Symmetric,
+            ykconfig,
+        }))
     }
 }
 
@@ -213,20 +211,15 @@ impl CryptoScheme for YubikeyCR {
 #[cfg(test)]
 mod test {
     #[test]
-    #[ignore]
     fn userpass_encrypt_decrypt() {
-        use super::{CleartextHeader, CryptoScheme, ExposeSecret, RawChunkPointer, YubikeyCR};
-        use yubico_manager::{
-            config::{Command, Config},
-            Yubico,
-        };
+        use super::{CleartextHeader, ExposeSecret, RawChunkPointer, YubikeyCR};
+        use yubico_manager::{config::Config, Yubico};
 
         let mut yubi = Yubico::new();
         let ykconfig = if let Ok(device) = yubi.find_yubikey() {
             Config::default()
                 .set_vendor_id(device.vendor_id)
                 .set_product_id(device.product_id)
-                .set_command(Command::Configuration1)
         } else {
             panic!("No Yubikey")
         };

@@ -108,24 +108,22 @@ impl Mode {
 }
 
 impl UsernamePassword {
-    pub fn with_credentials(username: SecretString, password: SecretString) -> Result<Arc<Self>> {
+    pub fn with_credentials(username: SecretString, password: SecretString) -> Result<KeySource> {
         let random = SystemRandom::new();
-        derive_argon2(
+        let master_key = derive_argon2(
             b"",
             username.expose_secret().as_bytes(),
             password.expose_secret().as_bytes(),
-        )
-        .and_then(|master_key| {
-            Ok(UsernamePassword {
-                inner: Symmetric {
-                    master_key,
-                    convergence_key: generate_key(&random)?,
-                },
-                username,
-                password,
-            }
-            .into())
-        })
+        )?;
+
+        Ok(Arc::new(UsernamePassword {
+            inner: Symmetric {
+                master_key,
+                convergence_key: generate_key(&random)?,
+            },
+            username,
+            password,
+        }))
     }
 }
 
