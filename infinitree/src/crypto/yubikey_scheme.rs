@@ -211,6 +211,7 @@ impl CryptoScheme for YubikeyCR {
 #[cfg(test)]
 mod test {
     #[test]
+    #[ignore]
     fn userpass_encrypt_decrypt() {
         use super::{CleartextHeader, ExposeSecret, RawChunkPointer, YubikeyCR};
         use yubico_manager::{config::Config, Yubico};
