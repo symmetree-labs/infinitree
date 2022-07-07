@@ -12,6 +12,11 @@ impl RawKey {
     pub(crate) fn new(k: [u8; KEY_SIZE]) -> Self {
         Self(Secret::new(k).into())
     }
+
+    pub(crate) fn write_to(&self, output: &mut [u8]) -> usize {
+        output[..KEY_SIZE].copy_from_slice(self.expose_secret());
+        KEY_SIZE
+    }
 }
 
 impl FromStr for RawKey {
@@ -41,5 +46,14 @@ impl ExposeSecret<[u8; KEY_SIZE]> for RawKey {
 impl From<[u8; KEY_SIZE]> for RawKey {
     fn from(k: [u8; KEY_SIZE]) -> Self {
         Self(Arc::new(k.into()))
+    }
+}
+
+impl From<&[u8]> for RawKey {
+    fn from(k: &[u8]) -> Self {
+        assert!(k.len() >= KEY_SIZE);
+        let mut buf = [0; KEY_SIZE];
+        buf.copy_from_slice(&k[..KEY_SIZE]);
+        Self(Arc::new(buf.into()))
     }
 }

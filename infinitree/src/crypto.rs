@@ -36,7 +36,9 @@ pub mod public {
         #[cfg(feature = "yubikey")]
         pub use super::super::yubikey_scheme as yubikey;
 
-        pub use super::super::{rawkey::RawKey, Hasher, IKeySource, KeySource, UsernamePassword};
+        pub use super::super::{
+            rawkey::RawKey, ChangeHeaderKey, Hasher, Key, KeySource, UsernamePassword,
+        };
     }
 }
 
@@ -86,7 +88,7 @@ fn derive_subkey(key: &RawKey, ctx: &str) -> Result<RawKey> {
 }
 
 fn generate_key(rand: &impl SecureRandom) -> Result<RawKey> {
-    let mut buf = [0; CRYPTO_DIGEST_SIZE];
+    let mut buf = [0; KEY_SIZE];
     rand.fill(&mut buf)?;
     Ok(buf.into())
 }

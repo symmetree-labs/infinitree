@@ -1,5 +1,5 @@
 use super::commit::*;
-use crate::{crypto::KeySource, fields::Serialized, index::TransactionList, ObjectId};
+use crate::{crypto::Key, fields::Serialized, index::TransactionList, ObjectId};
 use serde::{de::DeserializeOwned, Serialize};
 
 /// The root index of the tree that stores version information
@@ -29,14 +29,14 @@ where
     pub(crate) shadow_root: Serialized<ObjectId>,
 
     #[infinitree(skip)]
-    pub(crate) key: KeySource,
+    pub(crate) key: Key,
 }
 
 impl<CustomData> RootIndex<CustomData>
 where
     CustomData: Serialize + DeserializeOwned + Send + Sync + 'static,
 {
-    pub(crate) fn new(shadow_root: ObjectId, objects: Vec<ObjectId>, key: KeySource) -> Self {
+    pub(crate) fn new(shadow_root: ObjectId, objects: Vec<ObjectId>, key: Key) -> Self {
         Self {
             transaction_log: Default::default(),
             commit_list: Default::default(),
@@ -46,7 +46,7 @@ where
         }
     }
 
-    pub(crate) fn uninitialized(key: KeySource) -> Self {
+    pub(crate) fn uninitialized(key: Key) -> Self {
         Self {
             transaction_log: Default::default(),
             commit_list: Default::default(),

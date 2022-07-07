@@ -631,11 +631,8 @@ mod test {
     #[test]
     fn bare_index_can_be_restored() {
         let key = || {
-            UsernamePassword::with_credentials(
-                "bare_index_map".to_string().into(),
-                "password".to_string().into(),
-            )
-            .unwrap()
+            UsernamePassword::with_credentials("bare_index_map".to_string(), "password".to_string())
+                .unwrap()
         };
         let storage = crate::backends::test::InMemoryBackend::shared();
 

@@ -12,6 +12,8 @@ pub enum CryptoError {
         #[from]
         source: argon2::Error,
     },
+    #[error("Unsupported operation")]
+    Unsupported,
     #[error("Fatal error")]
     Fatal,
 }

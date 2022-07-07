@@ -9,6 +9,10 @@ use std::{mem::size_of, sync::Arc};
 
 type Nonce = [u8; 12];
 
+// Header size max 512b
+const HEADER_PAYLOAD: usize = size_of::<SealedHeader>() - size_of::<Tag>() - size_of::<Nonce>();
+const HEADER_CYPHERTEXT: usize = size_of::<SealedHeader>() - size_of::<Nonce>();
+
 /// Use a combination of username/password to locate and unlock a
 /// tree.
 ///
@@ -27,25 +31,21 @@ type Nonce = [u8; 12];
 /// ```text
 /// encrypt(root[88] || mode[1] || convergence_key[32] || 0[..]) || mac[16] || nonce[12]
 /// ```
-pub struct UsernamePassword {
-    inner: Symmetric,
+pub type UsernamePassword = SchemeInstance<Argon2UserPass, Symmetric>;
+
+pub struct Argon2UserPass {
+    master_key: RawKey,
     username: SecretString,
     password: SecretString,
 }
 
 pub struct Symmetric {
-    pub(super) master_key: RawKey,
     pub(super) convergence_key: RawKey,
 }
 
 pub struct MixedScheme {
-    master_key: RawKey,
-    ops: KeySource,
+    ops: super::symmetric08::Key,
 }
-
-// Header size max 512b
-const HEADER_PAYLOAD: usize = size_of::<SealedHeader>() - size_of::<Tag>() - size_of::<Nonce>();
-const HEADER_CYPHERTEXT: usize = size_of::<SealedHeader>() - size_of::<Nonce>();
 
 #[derive(Copy, Clone)]
 pub(super) enum Mode {
@@ -53,84 +53,24 @@ pub(super) enum Mode {
     Symmetric = 1,
 }
 
-impl TryFrom<u8> for Mode {
-    type Error = CryptoError;
-
-    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
-        use Mode::*;
-
-        match value {
-            0 => Ok(Mixed08),
-            1 => Ok(Symmetric),
-            _ => Err(CryptoError::Fatal),
-        }
-    }
-}
-
-impl Mode {
-    pub(super) fn keysource(&self, master_key: RawKey, convergence_key: RawKey) -> KeySource {
-        match self {
-            Mode::Symmetric => Arc::new(Symmetric {
-                master_key,
-                convergence_key,
-            }),
-            Mode::Mixed08 => Arc::new(MixedScheme {
-                master_key,
-                ops: super::symmetric08::Key::with_key(convergence_key),
-            }),
-        }
-    }
-
-    pub(super) fn encode_root_to(
-        &self,
-        output: &mut SealedHeader,
-        header: &CleartextHeader,
-    ) -> Result<usize> {
-        let mut pos = header.root_ptr.write_to(output);
-
-        //
-        // mark the mode to be New Symmetric.
-        output[pos] = *self as u8;
-        pos += 1;
-
-        //
-        // write out the convergence key
-        let convergence_key = header
-            .key
-            .expose_convergence_key()
-            .ok_or(CryptoError::Fatal)?;
-
-        let key = convergence_key.expose_secret();
-        output[pos..pos + key.len()].copy_from_slice(key);
-        pos += key.len();
-        Ok(pos)
-    }
-}
+pub struct SymmetricOps(pub(crate) RawKey);
 
 impl UsernamePassword {
-    pub fn with_credentials(username: SecretString, password: SecretString) -> Result<KeySource> {
-        let random = SystemRandom::new();
-        let master_key = derive_argon2(
-            b"",
-            username.expose_secret().as_bytes(),
-            password.expose_secret().as_bytes(),
-        )?;
-
-        Ok(Arc::new(UsernamePassword {
-            inner: Symmetric {
-                master_key,
-                convergence_key: generate_key(&random)?,
-            },
-            username,
-            password,
-        }))
-    }
-
     pub fn generate_password() -> Result<String> {
         let rand = ring::rand::SystemRandom::new();
-        let mut k = [0; 64];
+        let mut k = [0; 32];
         rand.fill(&mut k)?;
         Ok(hex::encode(&k))
+    }
+
+    pub fn with_credentials(
+        username: impl Into<SecretString>,
+        password: impl Into<SecretString>,
+    ) -> Result<Self> {
+        Ok(SchemeInstance::new(
+            Argon2UserPass::with_credentials(username.into(), password.into())?,
+            Symmetric::random()?,
+        ))
     }
 }
 
@@ -138,22 +78,19 @@ fn root_key(master_key: &RawKey) -> Result<RawKey> {
     derive_subkey(master_key, "zerostash.com 2022 root key")
 }
 
-fn root_object_id(master_key: &RawKey) -> Result<ObjectId> {
+pub(super) fn root_object_id(master_key: &RawKey) -> Result<ObjectId> {
     derive_subkey(master_key, "zerostash.com 2022 root object id")
         .map(|k| ObjectId::from_bytes(k.expose_secret()))
 }
 
-fn seal_header(master_key: &RawKey, mode: Mode, header: CleartextHeader) -> Result<SealedHeader> {
-    let mut output = SealedHeader::default();
+fn seal_header(master_key: &RawKey, open: OpenHeader) -> Result<SealedHeader> {
+    let mut output = open.0;
     let random = SystemRandom::new();
     let nonce = {
         let mut buf = Nonce::default();
         random.fill(&mut buf)?;
         aead::Nonce::assume_unique_for_key(buf)
     };
-
-    let pos = mode.encode_root_to(&mut output, &header)?;
-    debug_assert!(pos <= HEADER_CYPHERTEXT);
 
     // Copy the n-once before it gets eaten by the aead.
     output[HEADER_CYPHERTEXT..].copy_from_slice(nonce.as_ref());
@@ -163,94 +100,102 @@ fn seal_header(master_key: &RawKey, mode: Mode, header: CleartextHeader) -> Resu
         aead.seal_in_place_separate_tag(nonce, aead::Aad::empty(), &mut output[..HEADER_PAYLOAD])?;
     output[HEADER_PAYLOAD..HEADER_PAYLOAD + size_of::<Tag>()].copy_from_slice(tag.as_ref());
 
-    Ok(output)
+    Ok(SealedHeader(output))
 }
 
-fn open_header(master_key: &RawKey, mut sealed: SealedHeader) -> Result<CleartextHeader> {
-    let aead = get_aead(root_key(master_key)?);
-    let nonce = {
-        let mut buf = Nonce::default();
-        buf.copy_from_slice(&sealed[HEADER_CYPHERTEXT..]);
-        aead::Nonce::assume_unique_for_key(buf)
-    };
-
-    let header = aead
-        .open_in_place(nonce, aead::Aad::empty(), &mut sealed[..HEADER_CYPHERTEXT])
-        .map_err(CryptoError::from)?;
-
-    let (mut pos, root_ptr) = RawChunkPointer::parse(&header);
-    let mode = header[pos];
-    pos += 1;
-
-    let convergence_key = {
-        let mut buf = [0; CRYPTO_DIGEST_SIZE];
-        buf.copy_from_slice(&header[pos..pos + CRYPTO_DIGEST_SIZE]);
-        RawKey::new(buf)
-    };
-
-    let key: KeySource = Mode::try_from(mode)?.keysource(master_key.clone(), convergence_key);
-    Ok(CleartextHeader { root_ptr, key })
-}
-
-impl CryptoScheme for UsernamePassword {
-    fn root_object_id(&self) -> Result<ObjectId> {
-        self.inner.root_object_id()
-    }
-
-    fn open_root(self: Arc<Self>, header: SealedHeader) -> Result<CleartextHeader> {
-        open_header(&self.inner.master_key, header.clone()).or_else(|_| {
-            // open and transparently upgrade unsafe header format to this
-
-            let old_header = super::symmetric08::Key::from_credentials(
-                self.username.clone(),
-                self.password.clone(),
-            )?
-            .open_root(header)?;
-
-            Ok(CleartextHeader {
-                root_ptr: old_header.root_ptr,
-                key: Arc::new(MixedScheme {
-                    master_key: self.inner.master_key.clone(),
-                    ops: old_header.key,
-                }),
-            })
+impl Argon2UserPass {
+    pub(crate) fn with_credentials(username: SecretString, password: SecretString) -> Result<Self> {
+        let master_key = derive_argon2(
+            b"",
+            username.expose_secret().as_bytes(),
+            password.expose_secret().as_bytes(),
+        )?;
+        Ok(Argon2UserPass {
+            master_key,
+            username,
+            password,
         })
     }
-
-    fn seal_root(&self, header: CleartextHeader) -> Result<SealedHeader> {
-        self.inner.seal_root(header)
-    }
-
-    fn chunk_key(&self) -> Result<ChunkKey> {
-        self.inner.chunk_key()
-    }
-
-    fn index_key(&self) -> Result<IndexKey> {
-        self.inner.index_key()
-    }
-
-    fn storage_key(&self) -> Result<StorageKey> {
-        self.inner.storage_key()
-    }
-
-    fn expose_convergence_key(&self) -> Option<RawKey> {
-        self.inner.expose_convergence_key()
-    }
 }
 
-impl CryptoScheme for Symmetric {
+impl HeaderScheme for Argon2UserPass {
     fn root_object_id(&self) -> Result<ObjectId> {
         root_object_id(&self.master_key)
     }
 
-    fn open_root(self: Arc<Self>, header: SealedHeader) -> Result<CleartextHeader> {
-        open_header(&self.master_key, header)
+    fn open_root(&self, sealed: SealedHeader) -> Result<OpenHeader> {
+        let mut buf = sealed.0;
+
+        let aead = get_aead(root_key(&self.master_key)?);
+        let nonce = {
+            let mut buf = Nonce::default();
+            buf.copy_from_slice(&sealed[HEADER_CYPHERTEXT..]);
+            aead::Nonce::assume_unique_for_key(buf)
+        };
+
+        let _ = aead
+            .open_in_place(nonce, aead::Aad::empty(), &mut buf[..HEADER_CYPHERTEXT])
+            .map_err(CryptoError::from)?;
+
+        Ok(OpenHeader(buf))
     }
 
-    fn seal_root(&self, header: CleartextHeader) -> Result<SealedHeader> {
-        seal_header(&self.master_key, Mode::Symmetric, header)
+    fn open_header<IS: InternalScheme>(
+        self: Arc<Self>,
+        header: SealedHeader,
+        internal: &IS,
+    ) -> Result<(RawChunkPointer, SchemeInstance<Self, InternalKey>)>
+    where
+        Self: Sized + 'static,
+    {
+        match self.open_root(header.clone()) {
+            Ok(open) => {
+                let (pos, root_ptr) = RawChunkPointer::parse(&open);
+                let convergence = internal.read_key(&open[pos..]);
+
+                Ok((
+                    root_ptr,
+                    SchemeInstance {
+                        header: self,
+                        convergence,
+                    },
+                ))
+            }
+            Err(_) => {
+                // open and transparently upgrade unsafe header format to this
+                let old_key = super::symmetric08::Key::from_credentials(
+                    self.username.clone(),
+                    self.password.clone(),
+                )?;
+                let (root_ptr, ops) = old_key.open_root(header)?;
+
+                Ok((
+                    root_ptr,
+                    SchemeInstance {
+                        header: self,
+                        convergence: Arc::new(MixedScheme { ops }),
+                    },
+                ))
+            }
+        }
     }
 
+    fn seal_root(&self, open: OpenHeader) -> Result<SealedHeader> {
+        seal_header(&self.master_key, open)
+    }
+}
+
+impl Symmetric {
+    pub(crate) fn random() -> Result<Self> {
+        let random = SystemRandom::new();
+
+        Ok(Self {
+            convergence_key: generate_key(&random)?,
+        })
+    }
+}
+
+impl InternalScheme for Symmetric {
     fn chunk_key(&self) -> Result<ChunkKey> {
         Ok(ChunkKey::new(SymmetricOps(derive_subkey(
             &self.convergence_key,
@@ -272,24 +217,17 @@ impl CryptoScheme for Symmetric {
         )?)))
     }
 
-    fn expose_convergence_key(&self) -> Option<RawKey> {
-        Some(self.convergence_key.clone())
+    fn read_key(&self, raw_head: &[u8]) -> InternalKey {
+        Mode::read_with_mode(raw_head)
+    }
+
+    fn write_key(&self, raw_head: &mut [u8]) -> usize {
+        let output = Mode::Symmetric.write_to(raw_head);
+        1 + self.convergence_key.write_to(output)
     }
 }
 
-impl CryptoScheme for MixedScheme {
-    fn root_object_id(&self) -> Result<ObjectId> {
-        root_object_id(&self.master_key)
-    }
-
-    fn open_root(self: Arc<Self>, _header: SealedHeader) -> Result<CleartextHeader> {
-        unreachable!()
-    }
-
-    fn seal_root(&self, header: CleartextHeader) -> Result<SealedHeader> {
-        seal_header(&self.master_key, Mode::Mixed08, header)
-    }
-
+impl InternalScheme for MixedScheme {
     fn chunk_key(&self) -> Result<ChunkKey> {
         self.ops.chunk_key()
     }
@@ -302,13 +240,15 @@ impl CryptoScheme for MixedScheme {
         self.chunk_key().map(|ck| StorageKey(ck.0))
     }
 
-    fn expose_convergence_key(&self) -> Option<RawKey> {
-        self.ops.expose_convergence_key()
+    fn read_key(&self, _raw_head: &[u8]) -> InternalKey {
+        unreachable!()
+    }
+
+    fn write_key(&self, raw_head: &mut [u8]) -> usize {
+        let output = Mode::Mixed08.write_to(raw_head);
+        1 + self.ops.master_key().write_to(output)
     }
 }
-
-#[derive(Clone)]
-pub struct SymmetricOps(pub(crate) RawKey);
 
 impl ICryptoOps for SymmetricOps {
     #[inline]
@@ -385,12 +325,44 @@ impl ICryptoOps for SymmetricOps {
     }
 }
 
+impl TryFrom<u8> for Mode {
+    type Error = CryptoError;
+
+    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
+        use Mode::*;
+
+        match value {
+            0 => Ok(Mixed08),
+            1 => Ok(Symmetric),
+            _ => Err(CryptoError::Fatal),
+        }
+    }
+}
+
+impl Mode {
+    pub(super) fn read_with_mode(header: &[u8]) -> InternalKey {
+        let mode = Self::try_from(header[0]).unwrap();
+        let k: RawKey = header[1..].into();
+
+        match mode {
+            Mode::Symmetric => Arc::new(Symmetric { convergence_key: k }),
+            Mode::Mixed08 => Arc::new(MixedScheme {
+                ops: super::symmetric08::Key::with_key(k),
+            }),
+        }
+    }
+
+    pub(super) fn write_to<'buf>(&self, output: &'buf mut [u8]) -> &'buf mut [u8] {
+        output[0] = *self as u8;
+        &mut output[1..]
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
 
     const MASTER_KEY: [u8; CRYPTO_DIGEST_SIZE] = *b"abcdef1234567890abcdef1234567890";
-    const CONVERGENCE_KEY: [u8; CRYPTO_DIGEST_SIZE] = *b"1234567890abcdef1234567890abcdef";
     const TEST_SEALED_HEADER: SealedHeader = SealedHeader([
         66, 46, 17, 165, 56, 68, 174, 17, 116, 192, 220, 247, 147, 212, 53, 24, 24, 9, 70, 49, 6,
         91, 233, 98, 81, 247, 43, 60, 49, 167, 107, 79, 206, 72, 100, 235, 236, 136, 56, 185, 32,
@@ -422,82 +394,42 @@ mod test {
 
     #[test]
     fn symmetric_decrypt_header() {
-        let key = Arc::new(Symmetric {
+        let key = Argon2UserPass {
             master_key: MASTER_KEY.into(),
-            convergence_key: CONVERGENCE_KEY.into(),
-        });
+            username: "".to_string().into(),
+            password: "".to_string().into(),
+        };
 
-        let header = key.open_root(TEST_SEALED_HEADER).unwrap();
-        assert_eq!(header.root_ptr, RawChunkPointer::default());
-        assert_eq!(
-            header.key.expose_convergence_key().unwrap().expose_secret(),
-            &CONVERGENCE_KEY
-        );
+        let _ = key.open_root(TEST_SEALED_HEADER).unwrap();
     }
 
     #[test]
     fn symmetric_encrypt_header() {
-        let key = Arc::new(Symmetric {
+        let key = || Argon2UserPass {
             master_key: MASTER_KEY.into(),
-            convergence_key: CONVERGENCE_KEY.into(),
-        });
-
-        let ct = CleartextHeader {
-            root_ptr: Default::default(),
-            key,
+            username: "".to_string().into(),
+            password: "".to_string().into(),
         };
-        let header = ct.key.clone().seal_root(ct.clone()).unwrap();
+
+        let header = key().seal_root(Default::default()).unwrap();
 
         // Since the nonce is random, the encrypted buffer is not
         // predictible.
-        let header = ct.key.clone().open_root(header).unwrap();
-        assert_eq!(header.root_ptr, RawChunkPointer::default());
-        assert_eq!(
-            header.key.expose_convergence_key().unwrap().expose_secret(),
-            &CONVERGENCE_KEY
-        );
+        let _ = key().open_root(header).unwrap();
     }
 
     #[test]
     fn userpass_encrypt_decrypt() {
-        let seal_key = UsernamePassword::with_credentials(
-            "test".to_string().into(),
-            "test".to_string().into(),
-        )
-        .unwrap();
-        let convergence_key = seal_key.expose_convergence_key().unwrap();
-
-        let ct = CleartextHeader {
-            root_ptr: Default::default(),
-            key: seal_key,
-        };
-        let header = ct.key.clone().seal_root(ct.clone()).unwrap();
-
-        let open_key = UsernamePassword::with_credentials(
-            "test".to_string().into(),
-            "test".to_string().into(),
-        )
-        .unwrap();
-
-        let open_header = open_key.open_root(header).unwrap();
-        assert_eq!(open_header.root_ptr, RawChunkPointer::default());
-        assert_eq!(
-            open_header
-                .key
-                .expose_convergence_key()
-                .unwrap()
-                .expose_secret(),
-            convergence_key.expose_secret()
-        );
+        let key =
+            || UsernamePassword::with_credentials("test".to_string(), "test".to_string()).unwrap();
+        let header = key().header.seal_root(Default::default()).unwrap();
+        let _ = key().header.open_root(header).unwrap();
     }
 
     #[test]
     fn userpass_backwards_compat_root_address() {
-        let userpass = UsernamePassword::with_credentials(
-            "test".to_string().into(),
-            "test".to_string().into(),
-        )
-        .unwrap();
+        let userpass =
+            UsernamePassword::with_credentials("test".to_string(), "test".to_string()).unwrap();
 
         let symmetric08 = super::super::symmetric08::Key::from_credentials(
             "test".to_string().into(),
@@ -506,7 +438,7 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            userpass.root_object_id().unwrap(),
+            userpass.header.root_object_id().unwrap(),
             symmetric08.root_object_id().unwrap()
         );
     }
@@ -544,31 +476,24 @@ mod test {
             8, 198,
         ]);
 
-        let open_key = UsernamePassword::with_credentials(
-            "test".to_string().into(),
-            "test".to_string().into(),
-        )
-        .unwrap();
+        let open_key =
+            UsernamePassword::with_credentials("test".to_string(), "test".to_string()).unwrap();
 
-        let open_header = open_key.open_root(TEST_08_SEALED_HEADER.clone()).unwrap();
-        let sealed = open_header
-            .key
-            .clone()
-            .seal_root(open_header.clone())
+        let (root_ptr, key) = open_key
+            .header
+            .open_header(TEST_08_SEALED_HEADER.clone(), &Symmetric::random().unwrap())
             .unwrap();
+        let sealed = key.seal_root(&root_ptr).unwrap();
 
         // `symmetric08` will always produce the same header for the same data,
         // we want to avoid re-using the same algo on sealing
         assert_ne!(sealed, TEST_08_SEALED_HEADER);
 
-        let open_key = UsernamePassword::with_credentials(
-            "test".to_string().into(),
-            "test".to_string().into(),
-        )
-        .unwrap();
+        let open_key =
+            UsernamePassword::with_credentials("test".to_string(), "test".to_string()).unwrap();
 
         // make sure we can also re-open this
-        open_key.open_root(sealed).unwrap();
+        Arc::new(open_key).open_root(sealed).unwrap();
     }
 
     #[test]

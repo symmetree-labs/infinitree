@@ -1,7 +1,9 @@
 //! Asymmetric cryptography based encryption scheme for write-only
 //! trees.
-
-use super::*;
+use super::{
+    symmetric::{Argon2UserPass, Symmetric},
+    *,
+};
 use crate::{
     chunks::{ChunkPointer, RawChunkPointer},
     ObjectId,
@@ -56,11 +58,12 @@ impl Keypair {
 /// existing [`ChunkPointer`]s would be invalidated, and would need
 /// re-encryption, converting to and from `CryptoBoxStorage` is not
 /// supported.
-pub struct StorageOnly {
-    inner: KeySource,
+pub type StorageOnly = SchemeInstance<Argon2UserPass, CryptoBoxStorage>;
+
+pub struct CryptoBoxStorage {
+    inner: Symmetric,
     storage: Arc<InstanceKeys>,
 }
-
 struct CryptoBoxOps(CryptoOps, Arc<InstanceKeys>);
 struct InstanceKeys {
     pk: RawKey,
@@ -76,17 +79,20 @@ impl StorageOnly {
     /// The resulting encryption backend will panic if decryption
     /// operation is done through `Infinitree::storage_reader`.
     pub fn encrypt_only(
-        username: SecretString,
-        password: SecretString,
+        username: impl Into<SecretString>,
+        password: impl Into<SecretString>,
         public_key: RawKey,
-    ) -> Result<KeySource> {
-        Ok(Arc::new(StorageOnly {
-            inner: UsernamePassword::with_credentials(username, password)?,
-            storage: Arc::new(InstanceKeys {
-                pk: public_key,
-                sk: None,
-            }),
-        }))
+    ) -> Result<Key> {
+        Ok(Arc::new(SchemeInstance::new(
+            Argon2UserPass::with_credentials(username.into(), password.into())?,
+            CryptoBoxStorage {
+                inner: Symmetric::random()?,
+                storage: Arc::new(InstanceKeys {
+                    pk: public_key,
+                    sk: None,
+                }),
+            },
+        )))
     }
 
     /// Create a crypto backend that allows encryption and decryption
@@ -100,36 +106,21 @@ impl StorageOnly {
         password: SecretString,
         public_key: RawKey,
         secret_key: RawKey,
-    ) -> Result<KeySource> {
-        Ok(Arc::new(StorageOnly {
-            inner: UsernamePassword::with_credentials(username, password)?,
-            storage: Arc::new(InstanceKeys {
-                pk: public_key,
-                sk: Some(secret_key),
-            }),
-        }))
+    ) -> Result<Key> {
+        Ok(Arc::new(SchemeInstance::new(
+            Argon2UserPass::with_credentials(username, password)?,
+            CryptoBoxStorage {
+                inner: Symmetric::random()?,
+                storage: Arc::new(InstanceKeys {
+                    pk: public_key,
+                    sk: Some(secret_key),
+                }),
+            },
+        )))
     }
 }
 
-impl CryptoScheme for StorageOnly {
-    fn root_object_id(&self) -> Result<ObjectId> {
-        self.inner.root_object_id()
-    }
-
-    fn open_root(self: Arc<Self>, header: SealedHeader) -> Result<CleartextHeader> {
-        let mut ch = self.inner.clone().open_root(header)?;
-        ch.key = Arc::new(StorageOnly {
-            inner: ch.key,
-            storage: self.storage.clone(),
-        });
-
-        Ok(ch)
-    }
-
-    fn seal_root(&self, header: CleartextHeader) -> Result<SealedHeader> {
-        self.inner.seal_root(header)
-    }
-
+impl InternalScheme for CryptoBoxStorage {
     fn chunk_key(&self) -> Result<ChunkKey> {
         self.inner.chunk_key()
     }
@@ -145,8 +136,23 @@ impl CryptoScheme for StorageOnly {
         ))))
     }
 
-    fn expose_convergence_key(&self) -> Option<RawKey> {
-        None
+    fn read_key(&self, raw_head: &[u8]) -> InternalKey {
+        // skipping mode detection
+        let convergence_key = raw_head[1..].into();
+        let inner = Symmetric { convergence_key };
+
+        let pk: RawKey = raw_head[1 + KEY_SIZE..].into();
+        assert_eq!(pk.expose_secret(), self.storage.pk.expose_secret());
+
+        Arc::new(CryptoBoxStorage {
+            inner,
+            storage: self.storage.clone(),
+        })
+    }
+
+    fn write_key(&self, raw_head: &mut [u8]) -> usize {
+        let pos = self.inner.write_key(raw_head);
+        pos + self.storage.pk.write_to(&mut raw_head[pos..])
     }
 }
 
@@ -241,7 +247,7 @@ impl ICryptoOps for CryptoBoxOps {
 
 #[cfg(test)]
 mod test {
-    use crate::crypto::CryptoOps;
+    use crate::{crypto::CryptoOps, keys::crypto_box::StorageOnly};
     use std::sync::Arc;
 
     use super::InstanceKeys;
@@ -258,6 +264,20 @@ mod test {
     const HASH: &[u8; 32] = b"1234567890abcdef1234567890abcdef";
     const SIZE: usize = 26;
     const CLEARTEXT: &[u8; SIZE] = b"the quick brown fox jumps ";
+
+    #[test]
+    fn encrypt_decrypt() {
+        let key = || {
+            StorageOnly::encrypt_only("test".to_string(), "test".to_string(), PUBLIC_KEY.into())
+                .unwrap()
+        };
+
+        let header = key().seal_root(&Default::default()).unwrap();
+
+        let open_key = key();
+        let open_header = open_key.open_root(header).unwrap();
+        assert_eq!(open_header.root_ptr, Default::default());
+    }
 
     fn encrypt_decrypt_with_ops(crypto: CryptoOps) {
         use crate::object::WriteObject;
@@ -318,8 +338,8 @@ mod test {
     #[should_panic(expected = "No private key specified, can't decrypt data!")]
     fn keysource_encrypt_only() {
         let scheme = super::StorageOnly::encrypt_only(
-            "user".to_string().into(),
-            "pass".to_string().into(),
+            "user".to_string(),
+            "pass".to_string(),
             PUBLIC_KEY.into(),
         )
         .unwrap();

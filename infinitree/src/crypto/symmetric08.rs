@@ -2,10 +2,11 @@ use super::*;
 use crate::{chunks::*, ObjectId};
 use ring::aead;
 use secrecy::{ExposeSecret, SecretString};
-use std::{mem::size_of, sync::Arc};
+use std::mem::size_of;
 
 type Nonce = [u8; 12];
 
+#[derive(Clone)]
 pub struct Key {
     master_key: RawKey,
 }
@@ -14,51 +15,48 @@ pub struct Key {
 const HEADER_PAYLOAD: usize = size_of::<SealedHeader>() - size_of::<Tag>();
 
 impl Key {
-    pub(crate) fn from_credentials(
-        username: SecretString,
-        password: SecretString,
-    ) -> Result<KeySource> {
+    pub(crate) fn from_credentials(username: SecretString, password: SecretString) -> Result<Self> {
         let master_key = derive_argon2(
             b"",
             username.expose_secret().as_bytes(),
             password.expose_secret().as_bytes(),
         )?;
 
-        Ok(Arc::new(Key { master_key }))
+        Ok(Key { master_key })
     }
 
-    pub(crate) fn with_key(master_key: RawKey) -> KeySource {
-        Arc::new(Self { master_key })
+    pub(crate) fn with_key(master_key: RawKey) -> Self {
+        Self { master_key }
+    }
+
+    pub(super) fn master_key(&self) -> RawKey {
+        self.master_key.clone()
     }
 
     fn raw_index_key(&self) -> Result<RawKey> {
         derive_subkey(&self.master_key, "zerostash.com 2022 metadata key")
     }
-}
 
-impl CryptoScheme for Key {
-    fn root_object_id(&self) -> Result<ObjectId> {
+    pub(super) fn root_object_id(&self) -> Result<ObjectId> {
         derive_subkey(&self.master_key, "zerostash.com 2022 root object id")
             .map(|k| ObjectId::from_bytes(k.expose_secret()))
     }
 
-    fn open_root(self: Arc<Self>, mut header: SealedHeader) -> Result<CleartextHeader> {
+    pub(super) fn open_root(self, mut header: SealedHeader) -> Result<(RawChunkPointer, Self)> {
         let aead = get_aead(self.raw_index_key()?);
         let nonce = get_chunk_nonce(&self.root_object_id()?, HEADER_PAYLOAD as u32);
         aead.open_in_place(nonce, aead::Aad::empty(), header.as_mut())?;
 
-        Ok(CleartextHeader {
-            root_ptr: RawChunkPointer::parse(&header).1,
-            key: self,
-        })
+        Ok((RawChunkPointer::parse(&header).1, self))
     }
 
-    fn seal_root(&self, header: CleartextHeader) -> Result<SealedHeader> {
+    #[allow(unused)]
+    fn seal_root<IS>(&self, root_ptr: &RawChunkPointer, _internal: &IS) -> Result<SealedHeader> {
         let aead = get_aead(self.raw_index_key()?);
         let nonce = get_chunk_nonce(&self.root_object_id()?, HEADER_PAYLOAD as u32);
 
         let mut sealed = SealedHeader::default();
-        header.root_ptr.write_to(&mut sealed);
+        root_ptr.write_to(&mut sealed);
         let tag = aead.seal_in_place_separate_tag(
             nonce,
             aead::Aad::empty(),
@@ -69,24 +67,16 @@ impl CryptoScheme for Key {
         Ok(sealed)
     }
 
-    fn chunk_key(&self) -> Result<ChunkKey> {
+    pub(super) fn chunk_key(&self) -> Result<ChunkKey> {
         derive_subkey(&self.master_key, "zerostash.com 2022 object base key")
             .map(ObjectOperations::chunks)
             .map(super::ChunkKey::new)
     }
 
-    fn index_key(&self) -> Result<IndexKey> {
+    pub(super) fn index_key(&self) -> Result<IndexKey> {
         self.raw_index_key()
             .map(ObjectOperations::index)
             .map(super::IndexKey::new)
-    }
-
-    fn storage_key(&self) -> Result<StorageKey> {
-        self.chunk_key().map(|ck| StorageKey(ck.0))
-    }
-
-    fn expose_convergence_key(&self) -> Option<RawKey> {
-        Some(self.master_key.clone())
     }
 }
 
@@ -262,7 +252,7 @@ mod test {
             Key::from_credentials("test".to_string().into(), "test".to_string().into()).unwrap();
         let header = key.open_root(TEST_SEALED_HEADER).unwrap();
 
-        assert_eq!(header.root_ptr, RawChunkPointer::default());
+        assert_eq!(header.0, RawChunkPointer::default());
     }
 
     #[test]
@@ -271,12 +261,7 @@ mod test {
         let key =
             Key::from_credentials("test".to_string().into(), "test".to_string().into()).unwrap();
 
-        let ct = CleartextHeader {
-            root_ptr: Default::default(),
-            key,
-        };
-
-        let header = ct.key.clone().seal_root(ct).unwrap();
+        let header = key.clone().seal_root(&Default::default(), &key).unwrap();
 
         assert_eq!(header, TEST_SEALED_HEADER);
     }

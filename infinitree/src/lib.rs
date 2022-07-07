@@ -50,8 +50,8 @@
 //! fn main() -> anyhow::Result<()> {
 //!     let mut tree = Infinitree::<VersionedMap<String, usize>>::empty(
 //!         Directory::new("../test_data")?,
-//!         UsernamePassword::with_credentials("username".to_string().into(),
-//!                                            "password".to_string().into())?
+//!         UsernamePassword::with_credentials("username".to_string(),
+//!                                            "password".to_string())?
 //!     ).unwrap();
 //!
 //!     tree.index().insert("sample_size".into(), 1234);

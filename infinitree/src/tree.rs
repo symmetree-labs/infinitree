@@ -2,11 +2,12 @@
 #![deny(missing_docs)]
 
 use crate::{
-    crypto::{ICryptoOps, KeySource},
+    crypto::ICryptoOps,
     fields::{
         self, depth::Depth, Collection, Intent, Load, Query, QueryAction, QueryIteratorOwned,
     },
     index::{self, Index, IndexExt, TransactionList},
+    keys::KeySource,
     object::{AEADReader, AEADWriter, BlockBuffer, BufferedSink, Pool, PoolRef},
     Backend,
 };
@@ -83,11 +84,14 @@ where
     ///
     /// let mut tree = Infinitree::<Measurements>::empty(
     ///     Directory::new("/storage").unwrap(),
-    ///     UsernamePassword::with_credentials("username".to_string().into(),
-    ///                                        "password".to_string().into()).unwrap()
+    ///     UsernamePassword::with_credentials("username".to_string(),
+    ///                                        "password".to_string()).unwrap()
     /// ).unwrap();
     /// ```
-    pub fn empty(backend: Arc<dyn Backend>, key: KeySource) -> Result<Self> {
+    pub fn empty(
+        backend: Arc<dyn Backend>,
+        key: impl KeySource,
+    ) -> Result<Infinitree<I, CustomData>> {
         Self::with_key(backend, I::default(), key)
     }
 
@@ -95,8 +99,12 @@ where
     ///
     /// This method doesn't load the index, only the associated
     /// metadata.
-    pub fn open(backend: Arc<dyn Backend>, key: KeySource) -> Result<Self> {
-        let root = sealed_root::open(BlockBuffer::default(), backend.clone(), key.clone())?;
+    pub fn open(
+        backend: Arc<dyn Backend>,
+        key: impl KeySource,
+    ) -> Result<Infinitree<I, CustomData>> {
+        let key = Arc::new(key);
+        let root = sealed_root::open(BlockBuffer::default(), backend.clone(), key)?;
         let chunk_key = root.key.chunk_key()?;
 
         let reader_pool = {
@@ -105,7 +113,7 @@ where
                 AEADReader::new(backend.clone(), chunk_key.clone())
             })
         };
-        Ok(Self {
+        Ok(Infinitree {
             root,
             reader_pool,
             backend: backend.clone(),
@@ -133,7 +141,7 @@ where
     ///
     /// let mut tree = Infinitree::<infinitree::fields::VersionedMap<String, String>>::empty(
     ///     Directory::new("/storage").unwrap(),
-    ///     UsernamePassword::with_credentials("username".to_string().into(), "password".to_string().into()).unwrap()
+    ///     UsernamePassword::with_credentials("username".to_string(), "password".to_string()).unwrap()
     /// ).unwrap();
     ///
     /// // Commit message can be omitted using `None`
@@ -170,10 +178,15 @@ where
     /// This is primarily useful if you're done writing an `Index`,
     /// and want to commit and persist it, or if you need extra
     /// initialization because `Default` is not viable.
-    pub fn with_key(backend: Arc<dyn Backend>, index: I, key: KeySource) -> Result<Self> {
+    pub fn with_key(
+        backend: Arc<dyn Backend>,
+        index: I,
+        key: impl KeySource,
+    ) -> Result<Infinitree<I, CustomData>> {
+        let key = Arc::new(key);
         let chunk_key = key.chunk_key()?;
 
-        Ok(Self {
+        Ok(Infinitree {
             backend: backend.clone(),
             index: index.into(),
             root: RootIndex::uninitialized(key),
@@ -182,6 +195,15 @@ where
                 AEADReader::new(backend.clone(), chunk_key.clone())
             }),
         })
+    }
+
+    /// Change the current wrapping key and immediately commit to the backend.
+    ///
+    /// Will return an error if the operation is not supported by
+    /// either the new or the old key.
+    pub fn reseal(&mut self) -> Result<()> {
+        sealed_root::commit(&mut self.root, self.backend.clone())?;
+        Ok(())
     }
 
     /// Return all generations in the tree.
@@ -260,6 +282,60 @@ where
         Ok(self.last_commit())
     }
 
+    /// Return a handle for an internal object writer.
+    fn chunk_writer(&self) -> Result<AEADWriter> {
+        Ok(AEADWriter::new(
+            self.backend.clone(),
+            self.root.key.chunk_key()?,
+        ))
+    }
+
+    /// Return a handle for an internal object reader
+    fn chunk_reader(&self) -> Result<PoolRef<AEADReader>> {
+        Ok(self.reader_pool.lease()?)
+    }
+
+    /// Return a handle for an object writer.
+    ///
+    /// This can be used to manually write sparse data if you don't
+    /// want to store it in memory. Especially useful for e.g. files.
+    ///
+    /// Note that currently there's no fragmenting internally, so
+    /// anything written using an ObjectWriter **must** be less than
+    /// about 4MB.
+    pub fn storage_writer(&self) -> Result<AEADWriter> {
+        Ok(AEADWriter::for_storage(
+            self.backend.clone(),
+            self.root.key.storage_key()?,
+        ))
+    }
+
+    /// Return a handle for an object reader
+    ///
+    /// The object reader is for reading out those [`ChunkPointer`][crate::ChunkPointer]s
+    /// that you get when using an [`AEADWriter`] stack manually.
+    ///
+    /// You can obtain an [`AEADWriter`] using [`object_writer`][Self::storage_writer].
+    pub fn storage_reader(&self) -> Result<PoolRef<AEADReader>> {
+        Ok(PoolRef::without_pool(AEADReader::for_storage(
+            self.backend(),
+            self.root.key.storage_key()?,
+        )))
+    }
+
+    /// Get a hasher that produces hashes only usable with this
+    /// stash's keys
+    ///
+    /// This internally is a keyed Blake3 instance.
+    pub fn hasher(&self) -> Result<crate::Hasher> {
+        Ok(self.root.key.chunk_key()?.hasher())
+    }
+}
+
+impl<I: Index, CustomData> Infinitree<I, CustomData>
+where
+    CustomData: Serialize + DeserializeOwned + Send + Sync,
+{
     fn last_commit(&self) -> Option<Arc<Commit<CustomData>>> {
         self.root.commit_list.read().last().cloned()
     }
@@ -359,48 +435,6 @@ where
             .filter(|(_, name, _)| name == field)
             .collect::<Vec<_>>()
     }
-
-    /// Return a handle for an internal object writer.
-    fn chunk_writer(&self) -> Result<AEADWriter> {
-        Ok(AEADWriter::new(
-            self.backend.clone(),
-            self.root.key.chunk_key()?,
-        ))
-    }
-
-    /// Return a handle for an internal object reader
-    fn chunk_reader(&self) -> Result<PoolRef<AEADReader>> {
-        Ok(self.reader_pool.lease()?)
-    }
-
-    /// Return a handle for an object writer.
-    ///
-    /// This can be used to manually write sparse data if you don't
-    /// want to store it in memory. Especially useful for e.g. files.
-    ///
-    /// Note that currently there's no fragmenting internally, so
-    /// anything written using an ObjectWriter **must** be less than
-    /// about 4MB.
-    pub fn storage_writer(&self) -> Result<AEADWriter> {
-        Ok(AEADWriter::for_storage(
-            self.backend.clone(),
-            self.root.key.storage_key()?,
-        ))
-    }
-
-    /// Return a handle for an object reader
-    ///
-    /// The object reader is for reading out those [`ChunkPointer`][crate::ChunkPointer]s
-    /// that you get when using an [`AEADWriter`] stack manually.
-    ///
-    /// You can obtain an [`AEADWriter`] using [`object_writer`][Self::storage_writer].
-    pub fn storage_reader(&self) -> Result<PoolRef<AEADReader>> {
-        Ok(PoolRef::without_pool(AEADReader::for_storage(
-            self.backend(),
-            self.root.key.storage_key()?,
-        )))
-    }
-
     /// Return an immutable reference to the internal index.
     ///
     /// By design this is read-only, as the index fields
@@ -416,14 +450,6 @@ where
     /// jobs, or other background tasks.
     pub fn backend(&self) -> Arc<dyn Backend> {
         self.backend.clone()
-    }
-
-    /// Get a hasher that produces hashes only usable with this
-    /// stash's keys
-    ///
-    /// This internally is a keyed Blake3 instance.
-    pub fn hasher(&self) -> Result<crate::Hasher> {
-        Ok(self.root.key.chunk_key()?.hasher())
     }
 
     /// Returns the number of index objects

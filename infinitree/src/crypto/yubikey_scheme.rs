@@ -4,14 +4,11 @@
 //! provides all the utilities to program a Yubikey.
 //!
 //! See the documentation for [`YubikeyCR`] for additional details.
-use super::{
-    symmetric::{Mode, Symmetric},
-    *,
-};
-use crate::{chunks::*, ObjectId};
+use super::{symmetric::Symmetric, *};
+use crate::ObjectId;
 use ring::aead;
 use secrecy::{ExposeSecret, SecretString};
-use std::{mem::size_of, sync::Arc};
+use std::mem::size_of;
 pub use yubico_manager;
 use yubico_manager::Yubico;
 
@@ -45,10 +42,31 @@ const HEADER_CYPHERTEXT: usize =
 /// ```text
 /// encrypt(root[88] || mode[1] || convergence_key[32] || 0[..]) || mac[16] || nonce[12] || yubikey_challenge[64]
 /// ```
-pub struct YubikeyCR {
-    inner: KeySource,
+pub type YubikeyCR = SchemeInstance<YubikeyHeader, Symmetric>;
+impl YubikeyCR {
+    pub fn with_credentials(
+        username: SecretString,
+        password: SecretString,
+        ykconfig: yubico_manager::config::Config,
+    ) -> Result<Self> {
+        let master_key = derive_argon2(
+            b"zerostash.com yubikey cr master key",
+            username.expose_secret().as_bytes(),
+            password.expose_secret().as_bytes(),
+        )?;
+
+        Ok(Self::new(
+            YubikeyHeader {
+                master_key,
+                ykconfig,
+            },
+            Symmetric::random()?,
+        ))
+    }
+}
+
+pub struct YubikeyHeader {
     master_key: RawKey,
-    mode: Mode,
     ykconfig: yubico_manager::config::Config,
 }
 
@@ -72,148 +90,84 @@ fn header_key(
     Ok(blake3::derive_key("zerostash.com 2022 yubikey challenge-response", &k).into())
 }
 
-fn seal_header(
-    master_key: &RawKey,
-    mode: Mode,
-    header: CleartextHeader,
-    ykconfig: yubico_manager::config::Config,
-) -> Result<SealedHeader> {
-    let mut output = SealedHeader::default();
-    let random = SystemRandom::new();
-    let nonce = {
-        let mut buf = Nonce::default();
-        random.fill(&mut buf)?;
-        aead::Nonce::assume_unique_for_key(buf)
-    };
-    let challenge = {
-        let mut buf = [0; size_of::<Challenge>()];
-        random.fill(&mut buf)?;
-        buf
-    };
+impl HeaderScheme for YubikeyHeader {
+    fn open_root(&self, header: SealedHeader) -> Result<OpenHeader> {
+        let mut sealed = header.0;
 
-    let pos = mode.encode_root_to(&mut output, &header)?;
-    debug_assert!(pos <= HEADER_CYPHERTEXT);
+        let mut challenge = [0; size_of::<Challenge>()];
+        challenge.copy_from_slice(&sealed[HEADER_CYPHERTEXT + size_of::<Nonce>()..]);
 
-    //
-    // Copy the n-once before it gets eaten by the aead.
-    output[HEADER_CYPHERTEXT..HEADER_CYPHERTEXT + size_of::<Nonce>()]
-        .copy_from_slice(nonce.as_ref());
+        let aead = get_aead(header_key(
+            &self.master_key,
+            challenge,
+            self.ykconfig.clone(),
+        )?);
+        let nonce = {
+            let mut buf = Nonce::default();
+            buf.copy_from_slice(&sealed[HEADER_CYPHERTEXT..HEADER_CYPHERTEXT + size_of::<Nonce>()]);
+            aead::Nonce::assume_unique_for_key(buf)
+        };
 
-    let aead = get_aead(header_key(master_key, challenge, ykconfig)?);
-    let tag =
-        aead.seal_in_place_separate_tag(nonce, aead::Aad::empty(), &mut output[..HEADER_PAYLOAD])?;
+        let _ = aead
+            .open_in_place(nonce, aead::Aad::empty(), &mut sealed[..HEADER_CYPHERTEXT])
+            .map_err(CryptoError::from)?;
 
-    //
-    // Dump tag and challenge
-    output[HEADER_PAYLOAD..HEADER_PAYLOAD + size_of::<Tag>()].copy_from_slice(tag.as_ref());
-    output[HEADER_CYPHERTEXT + size_of::<Nonce>()..].copy_from_slice(&challenge);
+        Ok(OpenHeader(sealed))
+    }
 
-    Ok(output)
-}
-
-fn open_header(
-    master_key: RawKey,
-    mut sealed: SealedHeader,
-    ykconfig: yubico_manager::config::Config,
-) -> Result<CleartextHeader> {
-    let mut challenge = [0; size_of::<Challenge>()];
-    challenge.copy_from_slice(&sealed[HEADER_CYPHERTEXT + size_of::<Nonce>()..]);
-
-    let aead = get_aead(header_key(&master_key, challenge, ykconfig.clone())?);
-    let nonce = {
-        let mut buf = Nonce::default();
-        buf.copy_from_slice(&sealed[HEADER_CYPHERTEXT..HEADER_CYPHERTEXT + size_of::<Nonce>()]);
-        aead::Nonce::assume_unique_for_key(buf)
-    };
-
-    let header = aead
-        .open_in_place(nonce, aead::Aad::empty(), &mut sealed[..HEADER_CYPHERTEXT])
-        .map_err(CryptoError::from)?;
-
-    let (mut pos, root_ptr) = RawChunkPointer::parse(&header);
-    let mode = header[pos];
-    pos += 1;
-
-    let convergence_key = {
-        let mut buf = [0; KEY_SIZE];
-        buf.copy_from_slice(&header[pos..pos + KEY_SIZE]);
-        RawKey::new(buf)
-    };
-
-    let mode = Mode::try_from(mode)?;
-    let inner: KeySource = mode.keysource(master_key.clone(), convergence_key);
-
-    let key: KeySource = Arc::new(YubikeyCR {
-        inner,
-        mode,
-        ykconfig,
-        master_key,
-    });
-
-    Ok(CleartextHeader { root_ptr, key })
-}
-
-impl YubikeyCR {
-    pub fn with_credentials(
-        username: SecretString,
-        password: SecretString,
-        ykconfig: yubico_manager::config::Config,
-    ) -> Result<KeySource> {
+    fn seal_root(&self, header: OpenHeader) -> Result<SealedHeader> {
+        let mut output = header.0;
         let random = SystemRandom::new();
-        let master_key = derive_argon2(
-            b"zerostash.com yubikey cr master key",
-            username.expose_secret().as_bytes(),
-            password.expose_secret().as_bytes(),
+        let nonce = {
+            let mut buf = Nonce::default();
+            random.fill(&mut buf)?;
+            aead::Nonce::assume_unique_for_key(buf)
+        };
+        let challenge = {
+            let mut buf = [0; size_of::<Challenge>()];
+            random.fill(&mut buf)?;
+            buf
+        };
+
+        //
+        // Copy the n-once before it gets eaten by the aead.
+        output[HEADER_CYPHERTEXT..HEADER_CYPHERTEXT + size_of::<Nonce>()]
+            .copy_from_slice(nonce.as_ref());
+
+        let aead = get_aead(header_key(
+            &self.master_key,
+            challenge,
+            self.ykconfig.clone(),
+        )?);
+        let tag = aead.seal_in_place_separate_tag(
+            nonce,
+            aead::Aad::empty(),
+            &mut output[..HEADER_PAYLOAD],
         )?;
 
-        Ok(Arc::new(YubikeyCR {
-            inner: Arc::new(Symmetric {
-                master_key: master_key.clone(),
-                convergence_key: generate_key(&random)?,
-            }),
-            master_key,
-            mode: Mode::Symmetric,
-            ykconfig,
-        }))
-    }
-}
+        //
+        // Dump tag and challenge
+        output[HEADER_PAYLOAD..HEADER_PAYLOAD + size_of::<Tag>()].copy_from_slice(tag.as_ref());
+        output[HEADER_CYPHERTEXT + size_of::<Nonce>()..].copy_from_slice(&challenge);
 
-impl CryptoScheme for YubikeyCR {
+        Ok(SealedHeader(output))
+    }
+
     fn root_object_id(&self) -> Result<ObjectId> {
-        self.inner.root_object_id()
-    }
-
-    fn open_root(self: Arc<Self>, header: SealedHeader) -> Result<CleartextHeader> {
-        open_header(self.master_key.clone(), header, self.ykconfig.clone())
-    }
-
-    fn seal_root(&self, header: CleartextHeader) -> Result<SealedHeader> {
-        seal_header(&self.master_key, self.mode, header, self.ykconfig.clone())
-    }
-
-    fn chunk_key(&self) -> Result<ChunkKey> {
-        self.inner.chunk_key()
-    }
-
-    fn index_key(&self) -> Result<IndexKey> {
-        self.inner.index_key()
-    }
-
-    fn storage_key(&self) -> Result<StorageKey> {
-        self.inner.storage_key()
-    }
-
-    fn expose_convergence_key(&self) -> Option<RawKey> {
-        self.inner.expose_convergence_key()
+        super::symmetric::root_object_id(&self.master_key)
     }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::crypto::Scheme;
+    use std::sync::Arc;
+
     #[test]
     #[ignore]
     fn userpass_encrypt_decrypt() {
-        use super::{CleartextHeader, ExposeSecret, RawChunkPointer, YubikeyCR};
+        use super::YubikeyCR;
+        use crate::chunks::RawChunkPointer;
         use yubico_manager::{config::Config, Yubico};
 
         let mut yubi = Yubico::new();
@@ -231,14 +185,8 @@ mod test {
             ykconfig.clone(),
         )
         .unwrap();
-        let convergence_key = seal_key.expose_convergence_key().unwrap();
 
-        let ct = CleartextHeader {
-            root_ptr: Default::default(),
-            key: seal_key,
-        };
-        let header = ct.key.clone().seal_root(ct.clone()).unwrap();
-
+        let header = seal_key.seal_root(&Default::default()).unwrap();
         let open_key = YubikeyCR::with_credentials(
             "test".to_string().into(),
             "test".to_string().into(),
@@ -246,15 +194,7 @@ mod test {
         )
         .unwrap();
 
-        let open_header = open_key.open_root(header).unwrap();
+        let open_header = Arc::new(open_key).open_root(header).unwrap();
         assert_eq!(open_header.root_ptr, RawChunkPointer::default());
-        assert_eq!(
-            open_header
-                .key
-                .expose_convergence_key()
-                .unwrap()
-                .expose_secret(),
-            convergence_key.expose_secret()
-        );
     }
 }

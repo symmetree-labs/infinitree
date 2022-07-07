@@ -1,6 +1,6 @@
 use crate::{
     backends::{Backend, BackendError},
-    crypto::{CleartextHeader, CryptoError, KeySource, SealedHeader},
+    crypto::{CryptoError, Header, Key, SealedHeader},
     deserialize_from_slice,
     index::{FieldReader, IndexExt, TransactionList},
     object::{
@@ -61,7 +61,7 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 pub(crate) fn open<CustomData>(
     mut buffer: BlockBuffer,
     backend: Arc<dyn Backend>,
-    crypto: KeySource,
+    crypto: Key,
 ) -> Result<RootIndex<CustomData>>
 where
     CustomData: Serialize + DeserializeOwned + Send + Sync + 'static,
@@ -161,20 +161,15 @@ where
     let root_ptr = writer.write(&stream_buf)?.into_raw();
     *index.shadow_root.write() = root_ptr.object;
 
-    let header = CleartextHeader {
-        root_ptr,
-        key: crypto.clone(),
-    };
-
     // there's only 1 writer in the pool, so this is deterministic
     // this needs to change if saving indexes ever becomes multi-threaded
     Ok(writer
         .lease()?
-        .flush_root_head(root, &crypto.seal_root(header)?)?)
+        .flush_root_head(root, &crypto.seal_root(&root_ptr)?)?)
 }
 
 fn parse_transactions_stream(
-    header: &CleartextHeader,
+    header: &Header,
     raw: &[u8],
     buffer: &mut [u8],
     mut reader: PoolRef<AEADReader>,

@@ -3,7 +3,7 @@ use crate::object::ObjectId;
 use std::mem::size_of;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
-pub(crate) struct RawChunkPointer {
+pub struct RawChunkPointer {
     pub offs: u32,
     pub size: u32,
     pub object: ObjectId,
