@@ -42,7 +42,7 @@ const HEADER_CYPHERTEXT: usize =
 /// ```text
 /// encrypt(root[88] || mode[1] || convergence_key[32] || 0[..]) || mac[16] || nonce[12] || yubikey_challenge[64]
 /// ```
-pub type YubikeyCR = SchemeInstance<YubikeyHeader, Symmetric>;
+pub type YubikeyCR = KeyingScheme<YubikeyHeader, Symmetric>;
 impl YubikeyCR {
     pub fn with_credentials(
         username: SecretString,

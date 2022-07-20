@@ -22,7 +22,7 @@ pub trait Scheme: Send + Sync {
     fn storage_key(&self) -> Result<StorageKey>;
 }
 
-pub struct SchemeInstance<H, I> {
+pub struct KeyingScheme<H, I> {
     pub(crate) header: Arc<H>,
     pub(crate) convergence: I,
 }
@@ -36,7 +36,7 @@ pub trait HeaderScheme: Send + Sync {
         self: Arc<Self>,
         header: SealedHeader,
         internal: &IS,
-    ) -> Result<(RawChunkPointer, SchemeInstance<Self, InternalKey>)>
+    ) -> Result<(RawChunkPointer, KeyingScheme<Self, InternalKey>)>
     where
         Self: Sized + 'static,
     {
@@ -46,7 +46,7 @@ pub trait HeaderScheme: Send + Sync {
 
         Ok((
             root_ptr,
-            SchemeInstance {
+            KeyingScheme {
                 header: self,
                 convergence,
             },
@@ -87,7 +87,7 @@ impl InternalScheme for Arc<dyn InternalScheme> {
     }
 }
 
-impl<H, I> SchemeInstance<H, I> {
+impl<H, I> KeyingScheme<H, I> {
     pub(super) fn new(header: H, convergence: I) -> Self {
         Self {
             header: header.into(),
@@ -96,7 +96,7 @@ impl<H, I> SchemeInstance<H, I> {
     }
 }
 
-impl<H, I> Scheme for SchemeInstance<H, I>
+impl<H, I> Scheme for KeyingScheme<H, I>
 where
     H: HeaderScheme + 'static,
     I: InternalScheme,
@@ -141,7 +141,7 @@ pub struct ChangeHeaderKey<H, I> {
 }
 
 impl<H, I> ChangeHeaderKey<H, I> {
-    pub fn swap_on_seal(original: SchemeInstance<H, I>, new: SchemeInstance<H, I>) -> Self {
+    pub fn swap_on_seal(original: KeyingScheme<H, I>, new: KeyingScheme<H, I>) -> Self {
         Self {
             opener: original.header,
             sealer: new.header,
@@ -164,7 +164,7 @@ where
 
         Ok(Header {
             root_ptr,
-            key: Arc::new(SchemeInstance {
+            key: Arc::new(KeyingScheme {
                 header: self.sealer.clone(),
                 convergence: key.convergence,
             }),

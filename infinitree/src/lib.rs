@@ -188,7 +188,7 @@ pub mod tree;
 pub use anyhow;
 pub use chunks::ChunkPointer;
 pub use crypto::public::*;
-pub use crypto::{Digest, Hasher};
+pub use crypto::{Digest, Hasher, Key};
 pub use index::Index;
 pub use infinitree_macros::Index;
 pub use object::ObjectId;
@@ -202,6 +202,7 @@ use rmp_serde::encode::write as serialize_to_writer;
 use rmp_serde::to_vec as serialize_to_vec;
 use rmp_serde::Deserializer;
 
+/// Size of a storage object unit.
 pub const BLOCK_SIZE: usize = 4 * 1024 * 1024;
 
 #[cfg(test)]

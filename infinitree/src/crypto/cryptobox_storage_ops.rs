@@ -58,7 +58,7 @@ impl Keypair {
 /// existing [`ChunkPointer`]s would be invalidated, and would need
 /// re-encryption, converting to and from `CryptoBoxStorage` is not
 /// supported.
-pub type StorageOnly = SchemeInstance<Argon2UserPass, CryptoBoxStorage>;
+pub type StorageOnly = KeyingScheme<Argon2UserPass, CryptoBoxStorage>;
 
 pub struct CryptoBoxStorage {
     inner: Symmetric,
@@ -83,7 +83,7 @@ impl StorageOnly {
         password: impl Into<SecretString>,
         public_key: RawKey,
     ) -> Result<Key> {
-        Ok(Arc::new(SchemeInstance::new(
+        Ok(Arc::new(KeyingScheme::new(
             Argon2UserPass::with_credentials(username.into(), password.into())?,
             CryptoBoxStorage {
                 inner: Symmetric::random()?,
@@ -107,7 +107,7 @@ impl StorageOnly {
         public_key: RawKey,
         secret_key: RawKey,
     ) -> Result<Key> {
-        Ok(Arc::new(SchemeInstance::new(
+        Ok(Arc::new(KeyingScheme::new(
             Argon2UserPass::with_credentials(username, password)?,
             CryptoBoxStorage {
                 inner: Symmetric::random()?,

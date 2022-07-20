@@ -32,12 +32,18 @@ pub mod public {
         //! Encryption schemes and modes.
 
         #[cfg(feature = "cryptobox")]
-        pub use super::super::cryptobox_storage_ops as crypto_box;
-        #[cfg(feature = "yubikey")]
-        pub use super::super::yubikey_scheme as yubikey;
+        pub mod cryptobox {
+            pub use crate::crypto::cryptobox_storage_ops::{Keypair, StorageOnly};
+        }
 
-        pub use super::super::{
-            rawkey::RawKey, ChangeHeaderKey, Hasher, Key, KeySource, UsernamePassword,
+        #[cfg(feature = "yubikey")]
+        pub mod yubikey {
+            pub use crate::crypto::yubikey_scheme::YubikeyCR;
+            pub use yubico_manager;
+        }
+
+        pub use crate::crypto::{
+            rawkey::RawKey, ChangeHeaderKey, Hasher, KeySource, UsernamePassword,
         };
     }
 }

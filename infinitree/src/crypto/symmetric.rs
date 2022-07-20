@@ -31,7 +31,7 @@ const HEADER_CYPHERTEXT: usize = size_of::<SealedHeader>() - size_of::<Nonce>();
 /// ```text
 /// encrypt(root[88] || mode[1] || convergence_key[32] || 0[..]) || mac[16] || nonce[12]
 /// ```
-pub type UsernamePassword = SchemeInstance<Argon2UserPass, Symmetric>;
+pub type UsernamePassword = KeyingScheme<Argon2UserPass, Symmetric>;
 
 pub struct Argon2UserPass {
     master_key: RawKey,
@@ -67,7 +67,7 @@ impl UsernamePassword {
         username: impl Into<SecretString>,
         password: impl Into<SecretString>,
     ) -> Result<Self> {
-        Ok(SchemeInstance::new(
+        Ok(KeyingScheme::new(
             Argon2UserPass::with_credentials(username.into(), password.into())?,
             Symmetric::random()?,
         ))
@@ -144,7 +144,7 @@ impl HeaderScheme for Argon2UserPass {
         self: Arc<Self>,
         header: SealedHeader,
         internal: &IS,
-    ) -> Result<(RawChunkPointer, SchemeInstance<Self, InternalKey>)>
+    ) -> Result<(RawChunkPointer, KeyingScheme<Self, InternalKey>)>
     where
         Self: Sized + 'static,
     {
@@ -155,7 +155,7 @@ impl HeaderScheme for Argon2UserPass {
 
                 Ok((
                     root_ptr,
-                    SchemeInstance {
+                    KeyingScheme {
                         header: self,
                         convergence,
                     },
@@ -171,7 +171,7 @@ impl HeaderScheme for Argon2UserPass {
 
                 Ok((
                     root_ptr,
-                    SchemeInstance {
+                    KeyingScheme {
                         header: self,
                         convergence: Arc::new(MixedScheme { ops }),
                     },
