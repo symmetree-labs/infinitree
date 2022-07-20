@@ -7,9 +7,8 @@ use crate::{
         self, depth::Depth, Collection, Intent, Load, Query, QueryAction, QueryIteratorOwned,
     },
     index::{self, Index, IndexExt, TransactionList},
-    keys::KeySource,
     object::{AEADReader, AEADWriter, BlockBuffer, BufferedSink, Pool, PoolRef},
-    Backend,
+    Backend, Key,
 };
 use anyhow::Result;
 use parking_lot::RwLock;
@@ -90,7 +89,7 @@ where
     /// ```
     pub fn empty(
         backend: Arc<dyn Backend>,
-        key: impl KeySource,
+        key: impl Into<Key>,
     ) -> Result<Infinitree<I, CustomData>> {
         Self::with_key(backend, I::default(), key)
     }
@@ -101,9 +100,9 @@ where
     /// metadata.
     pub fn open(
         backend: Arc<dyn Backend>,
-        key: impl KeySource,
+        key: impl Into<Key>,
     ) -> Result<Infinitree<I, CustomData>> {
-        let key = Arc::new(key);
+        let key = key.into();
         let root = sealed_root::open(BlockBuffer::default(), backend.clone(), key)?;
         let chunk_key = root.key.chunk_key()?;
 
@@ -181,9 +180,9 @@ where
     pub fn with_key(
         backend: Arc<dyn Backend>,
         index: I,
-        key: impl KeySource,
+        key: impl Into<Key>,
     ) -> Result<Infinitree<I, CustomData>> {
-        let key = Arc::new(key);
+        let key = key.into();
         let chunk_key = key.chunk_key()?;
 
         Ok(Infinitree {

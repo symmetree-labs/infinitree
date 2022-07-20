@@ -6,6 +6,12 @@ use std::sync::Arc;
 pub trait KeySource: 'static + Scheme {}
 impl<T> KeySource for T where T: 'static + Scheme {}
 
+impl<H: HeaderScheme + 'static, I: InternalScheme + 'static> Into<Key> for KeyingScheme<H, I> {
+    fn into(self) -> Key {
+        Arc::new(self)
+    }
+}
+
 /// Key source for all crypto operations.
 pub type Key = Arc<dyn KeySource>;
 pub type InternalKey = Arc<dyn InternalScheme>;

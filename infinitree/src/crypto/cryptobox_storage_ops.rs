@@ -82,8 +82,8 @@ impl StorageOnly {
         username: impl Into<SecretString>,
         password: impl Into<SecretString>,
         public_key: RawKey,
-    ) -> Result<Key> {
-        Ok(Arc::new(KeyingScheme::new(
+    ) -> Result<Self> {
+        Ok(KeyingScheme::new(
             Argon2UserPass::with_credentials(username.into(), password.into())?,
             CryptoBoxStorage {
                 inner: Symmetric::random()?,
@@ -92,7 +92,7 @@ impl StorageOnly {
                     sk: None,
                 }),
             },
-        )))
+        ))
     }
 
     /// Create a crypto backend that allows encryption and decryption
@@ -106,8 +106,8 @@ impl StorageOnly {
         password: SecretString,
         public_key: RawKey,
         secret_key: RawKey,
-    ) -> Result<Key> {
-        Ok(Arc::new(KeyingScheme::new(
+    ) -> Result<Self> {
+        Ok(KeyingScheme::new(
             Argon2UserPass::with_credentials(username, password)?,
             CryptoBoxStorage {
                 inner: Symmetric::random()?,
@@ -116,7 +116,7 @@ impl StorageOnly {
                     sk: Some(secret_key),
                 }),
             },
-        )))
+        ))
     }
 }
 
@@ -247,7 +247,7 @@ impl ICryptoOps for CryptoBoxOps {
 
 #[cfg(test)]
 mod test {
-    use crate::{crypto::CryptoOps, keys::crypto_box::StorageOnly};
+    use crate::{crypto::*, keys::cryptobox::StorageOnly};
     use std::sync::Arc;
 
     use super::InstanceKeys;
@@ -268,8 +268,14 @@ mod test {
     #[test]
     fn encrypt_decrypt() {
         let key = || {
-            StorageOnly::encrypt_only("test".to_string(), "test".to_string(), PUBLIC_KEY.into())
-                .unwrap()
+            Arc::new(
+                StorageOnly::encrypt_only(
+                    "test".to_string(),
+                    "test".to_string(),
+                    PUBLIC_KEY.into(),
+                )
+                .unwrap(),
+            )
         };
 
         let header = key().seal_root(&Default::default()).unwrap();
