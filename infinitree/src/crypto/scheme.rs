@@ -140,14 +140,14 @@ where
     }
 }
 
-pub struct ChangeHeaderKey<H, I> {
+pub struct ChangeHeaderKey<H, N, I> {
     opener: Arc<H>,
-    sealer: Arc<H>,
+    sealer: Arc<N>,
     convergence: I,
 }
 
-impl<H, I> ChangeHeaderKey<H, I> {
-    pub fn swap_on_seal(original: KeyingScheme<H, I>, new: KeyingScheme<H, I>) -> Self {
+impl<H, N, I> ChangeHeaderKey<H, N, I> {
+    pub fn swap_on_seal(original: KeyingScheme<H, I>, new: KeyingScheme<N, I>) -> Self {
         Self {
             opener: original.header,
             sealer: new.header,
@@ -156,9 +156,10 @@ impl<H, I> ChangeHeaderKey<H, I> {
     }
 }
 
-impl<H, I> Scheme for ChangeHeaderKey<H, I>
+impl<H, N, I> Scheme for ChangeHeaderKey<H, N, I>
 where
     H: HeaderScheme + 'static,
+    N: HeaderScheme + 'static,
     I: InternalScheme,
 {
     fn root_object_id(&self) -> Result<ObjectId> {
