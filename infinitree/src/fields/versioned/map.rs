@@ -622,9 +622,9 @@ where
 mod test {
     use super::VersionedMap;
     use crate::{
+        crypto::UsernamePassword,
         fields::{LocalField, SparseField, Strategy},
         index::test::store_then_load,
-        keys::UsernamePassword,
         Infinitree,
     };
 

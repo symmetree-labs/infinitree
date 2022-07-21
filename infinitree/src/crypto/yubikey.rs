@@ -22,7 +22,7 @@ const HEADER_CYPHERTEXT: usize =
     size_of::<SealedHeader>() - size_of::<Nonce>() - size_of::<Challenge>();
 
 /// This mode's behaviour is equivalent to the
-/// [`UsernamePassword`](crate::keys::UsernamePassword) `KeySource`, but
+/// [`UsernamePassword`](crate::crypto::UsernamePassword) `KeySource`, but
 /// adds a second factor.
 ///
 /// ## Touch-to-sign configuration

@@ -187,7 +187,6 @@ pub mod tree;
 
 pub use anyhow;
 pub use chunks::ChunkPointer;
-pub use crypto as keys;
 pub use crypto::{Digest, Hasher, Key};
 pub use index::Index;
 pub use infinitree_macros::Index;

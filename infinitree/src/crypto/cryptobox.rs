@@ -252,7 +252,7 @@ impl ICryptoOps for CryptoBoxOps {
 
 #[cfg(test)]
 mod test {
-    use crate::{crypto::*, keys::cryptobox::StorageOnly};
+    use crate::{crypto::cryptobox::StorageOnly, crypto::*};
     use std::sync::Arc;
 
     use super::InstanceKeys;
