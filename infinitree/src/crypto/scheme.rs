@@ -23,6 +23,7 @@ impl<H, I> KeyingScheme<H, I> {
     }
 }
 
+#[allow(clippy::from_over_into)]
 impl<H: HeaderScheme + 'static, I: InternalScheme + 'static> Into<Key> for KeyingScheme<H, I> {
     fn into(self) -> Key {
         Arc::new(self)
