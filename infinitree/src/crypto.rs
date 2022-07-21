@@ -12,11 +12,10 @@ mod scheme;
 mod symmetric;
 pub(crate) mod symmetric08;
 
-use rawkey::*;
-
 pub(crate) use error::*;
 pub(crate) use header::*;
 pub(crate) use ops::*;
+pub use rawkey::*;
 pub use scheme::*;
 pub use symmetric::UsernamePassword;
 
