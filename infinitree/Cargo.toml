@@ -40,7 +40,7 @@ parking_lot = "0.12.1"
 
 serde = { version = "1.0.137", features = ["rc"] }
 serde_derive = "1.0.137"
-serde_with = "1.14.0"
+serde_with = "2.0.0"
 rmp-serde = "1.1.0"
 
 secrecy = "0.8.0"
