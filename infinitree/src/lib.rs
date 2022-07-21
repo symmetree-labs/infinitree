@@ -41,7 +41,7 @@
 //! ```
 //! use infinitree::{
 //!     *,
-//!     keys::UsernamePassword,
+//!     crypto::UsernamePassword,
 //!     backends::Directory,
 //!     fields::{VersionedMap},
 //! };

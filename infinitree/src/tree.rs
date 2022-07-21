@@ -74,7 +74,7 @@ where
     /// # Examples
     ///
     /// ```no_run
-    /// use infinitree::{*, keys::UsernamePassword, fields::Serialized, backends::Directory};
+    /// use infinitree::{*, crypto::UsernamePassword, fields::Serialized, backends::Directory};
     ///
     /// #[derive(Index, Default)]
     /// struct Measurements {
@@ -136,7 +136,7 @@ where
     /// Any commit message works that implements [`ToString`].
     ///
     /// ```no_run
-    /// use infinitree::{*, keys::UsernamePassword, fields::Serialized, backends::Directory};
+    /// use infinitree::{*, crypto::UsernamePassword, fields::Serialized, backends::Directory};
     ///
     /// let mut tree = Infinitree::<infinitree::fields::VersionedMap<String, String>>::empty(
     ///     Directory::new("/storage").unwrap(),

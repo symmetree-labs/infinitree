@@ -139,7 +139,7 @@ impl<R: Reader> Read for BufferedStream<R> {
 ///
 /// ```
 /// use std::io::Write;
-/// use infinitree::{*, keys::UsernamePassword, fields::Serialized, backends::test::InMemoryBackend, object::{Stream, BufferedSink}};
+/// use infinitree::{*, crypto::UsernamePassword, fields::Serialized, backends::test::InMemoryBackend, object::{Stream, BufferedSink}};
 ///
 /// let mut tree = Infinitree::<infinitree::fields::VersionedMap<String, Stream>>::empty(
 ///     InMemoryBackend::shared(),
