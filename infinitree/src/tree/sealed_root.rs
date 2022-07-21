@@ -1,6 +1,7 @@
 use crate::{
     backends::{Backend, BackendError},
-    crypto::{CryptoError, Header, Key, SealedHeader},
+    chunks::RawChunkPointer,
+    crypto::{CryptoError, Key, SealedHeader},
     deserialize_from_slice,
     index::{FieldReader, IndexExt, TransactionList},
     object::{
@@ -84,8 +85,13 @@ where
     };
 
     let (shadow_root, objects, transaction_list) = {
-        let (shadow_root, stream_ptr) =
-            parse_transactions_stream(&header, object.as_inner(), &mut buffer, pool.lease()?)?;
+        let (shadow_root, stream_ptr) = parse_transactions_stream(
+            &header.root_ptr,
+            root,
+            object.as_inner(),
+            &mut buffer,
+            pool.lease()?,
+        )?;
 
         let stream_objects = stream_ptr.objects();
 
@@ -169,14 +175,14 @@ where
 }
 
 fn parse_transactions_stream(
-    header: &Header,
+    root_ptr: &RawChunkPointer,
+    root_object: ObjectId,
     raw: &[u8],
     buffer: &mut [u8],
     mut reader: PoolRef<AEADReader>,
 ) -> Result<(ObjectId, Stream)> {
-    let root_ptr = &header.root_ptr;
     let shadow_root = root_ptr.object;
-    reader.override_root_id(shadow_root, header.key.root_object_id()?);
+    reader.override_root_id(shadow_root, root_object);
 
     let stream: Stream = deserialize_from_slice(reader.decrypt_decompress(
         buffer,
