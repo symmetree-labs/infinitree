@@ -1,5 +1,6 @@
 use infinitree::{
-    backends::test::InMemoryBackend, fields::Serialized, keys::UsernamePassword, Index, Infinitree,
+    backends::test::InMemoryBackend, crypto::UsernamePassword, fields::Serialized, Index,
+    Infinitree,
 };
 
 use criterion::{criterion_group, Criterion};
