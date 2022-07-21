@@ -1,6 +1,7 @@
+//! Encryption key management and secure hashing
 pub use blake3::Hasher;
 use ring::aead;
-pub use ring::rand::{SecureRandom, SystemRandom};
+pub(crate) use ring::rand::{SecureRandom, SystemRandom};
 use secrecy::{ExposeSecret, Zeroize};
 
 mod error;
@@ -9,44 +10,23 @@ mod ops;
 mod rawkey;
 mod scheme;
 mod symmetric;
+pub(crate) mod symmetric08;
 
 use rawkey::*;
 
-pub use error::*;
-pub use header::*;
-pub use ops::*;
+pub(crate) use error::*;
+pub(crate) use header::*;
+pub(crate) use ops::*;
 pub use scheme::*;
 pub use symmetric::UsernamePassword;
-pub mod symmetric08;
 
 #[cfg(feature = "cryptobox")]
-pub mod cryptobox_storage_ops;
+pub mod cryptobox;
 
 #[cfg(feature = "yubikey")]
-pub mod yubikey_scheme;
+pub mod yubikey;
 
 const CRYPTO_DIGEST_SIZE: usize = 32;
-
-pub mod public {
-    pub mod keys {
-        //! Encryption schemes and modes.
-
-        #[cfg(feature = "cryptobox")]
-        pub mod cryptobox {
-            pub use crate::crypto::cryptobox_storage_ops::{Keypair, StorageOnly};
-        }
-
-        #[cfg(feature = "yubikey")]
-        pub mod yubikey {
-            pub use crate::crypto::yubikey_scheme::YubikeyCR;
-            pub use yubico_manager;
-        }
-
-        pub use crate::crypto::{
-            rawkey::RawKey, ChangeHeaderKey, Hasher, KeySource, UsernamePassword,
-        };
-    }
-}
 
 // TODO: ideally this should be a tuple struct wrapping blake3::Hash,
 // implementing Serialize & Deserialize and the rest.

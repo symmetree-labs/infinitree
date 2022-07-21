@@ -32,29 +32,6 @@ const HEADER_CYPHERTEXT: usize = size_of::<SealedHeader>() - size_of::<Nonce>();
 /// encrypt(root[88] || mode[1] || convergence_key[32] || 0[..]) || mac[16] || nonce[12]
 /// ```
 pub type UsernamePassword = KeyingScheme<Argon2UserPass, Symmetric>;
-
-pub struct Argon2UserPass {
-    master_key: RawKey,
-    username: SecretString,
-    password: SecretString,
-}
-
-pub struct Symmetric {
-    pub(super) convergence_key: RawKey,
-}
-
-pub struct MixedScheme {
-    ops: super::symmetric08::Key,
-}
-
-#[derive(Copy, Clone)]
-pub(super) enum Mode {
-    Mixed08 = 0,
-    Symmetric = 1,
-}
-
-pub struct SymmetricOps(pub(crate) RawKey);
-
 impl UsernamePassword {
     pub fn generate_password() -> Result<String> {
         let rand = ring::rand::SystemRandom::new();
@@ -71,6 +48,295 @@ impl UsernamePassword {
             Argon2UserPass::with_credentials(username.into(), password.into())?,
             Symmetric::random()?,
         ))
+    }
+}
+
+pub(crate) use private::*;
+mod private {
+    use super::*;
+
+    pub struct Argon2UserPass {
+        pub master_key: RawKey,
+        pub username: SecretString,
+        pub password: SecretString,
+    }
+
+    impl Argon2UserPass {
+        pub(crate) fn with_credentials(
+            username: SecretString,
+            password: SecretString,
+        ) -> Result<Self> {
+            let master_key = derive_argon2(
+                b"",
+                username.expose_secret().as_bytes(),
+                password.expose_secret().as_bytes(),
+            )?;
+            Ok(Argon2UserPass {
+                master_key,
+                username,
+                password,
+            })
+        }
+    }
+
+    impl HeaderScheme for Argon2UserPass {
+        fn root_object_id(&self) -> Result<ObjectId> {
+            root_object_id(&self.master_key)
+        }
+
+        fn open_root(&self, sealed: SealedHeader) -> Result<OpenHeader> {
+            let mut buf = sealed.0;
+
+            let aead = get_aead(root_key(&self.master_key)?);
+            let nonce = {
+                let mut buf = Nonce::default();
+                buf.copy_from_slice(&sealed[HEADER_CYPHERTEXT..]);
+                aead::Nonce::assume_unique_for_key(buf)
+            };
+
+            let _ = aead
+                .open_in_place(nonce, aead::Aad::empty(), &mut buf[..HEADER_CYPHERTEXT])
+                .map_err(CryptoError::from)?;
+
+            Ok(OpenHeader(buf))
+        }
+
+        fn open_header<IS: InternalScheme>(
+            self: Arc<Self>,
+            header: SealedHeader,
+            internal: &IS,
+        ) -> Result<(RawChunkPointer, KeyingScheme<Self, InternalKey>)>
+        where
+            Self: Sized + 'static,
+        {
+            match self.open_root(header.clone()) {
+                Ok(open) => {
+                    let (pos, root_ptr) = RawChunkPointer::parse(&open);
+                    let convergence = internal.read_key(&open[pos..]);
+
+                    Ok((
+                        root_ptr,
+                        KeyingScheme {
+                            header: self,
+                            convergence,
+                        },
+                    ))
+                }
+                Err(_) => {
+                    // open and transparently upgrade unsafe header format to this
+                    let old_key = super::symmetric08::Key::from_credentials(
+                        self.username.clone(),
+                        self.password.clone(),
+                    )?;
+                    let (root_ptr, ops) = old_key.open_root(header)?;
+
+                    Ok((
+                        root_ptr,
+                        KeyingScheme {
+                            header: self,
+                            convergence: Arc::new(MixedScheme { ops }),
+                        },
+                    ))
+                }
+            }
+        }
+
+        fn seal_root(&self, open: OpenHeader) -> Result<SealedHeader> {
+            seal_header(&self.master_key, open)
+        }
+    }
+
+    pub struct Symmetric {
+        convergence_key: RawKey,
+    }
+
+    impl Symmetric {
+        pub fn new(convergence_key: RawKey) -> Self {
+            Self { convergence_key }
+        }
+
+        pub fn random() -> Result<Self> {
+            let random = SystemRandom::new();
+
+            Ok(Self {
+                convergence_key: generate_key(&random)?,
+            })
+        }
+    }
+
+    impl InternalScheme for Symmetric {
+        fn chunk_key(&self) -> Result<ChunkKey> {
+            Ok(ChunkKey::new(SymmetricOps(derive_subkey(
+                &self.convergence_key,
+                "zerostash.com 2022 chunk key",
+            )?)))
+        }
+
+        fn index_key(&self) -> Result<IndexKey> {
+            Ok(IndexKey::new(SymmetricOps(derive_subkey(
+                &self.convergence_key,
+                "zerostash.com 2022 index key",
+            )?)))
+        }
+
+        fn storage_key(&self) -> Result<StorageKey> {
+            Ok(StorageKey::new(SymmetricOps(derive_subkey(
+                &self.convergence_key,
+                "zerostash.com 2022 storage key",
+            )?)))
+        }
+
+        fn read_key(&self, raw_head: &[u8]) -> InternalKey {
+            Mode::read_with_mode(raw_head)
+        }
+
+        fn write_key(&self, raw_head: &mut [u8]) -> usize {
+            let output = Mode::Symmetric.write_to(raw_head);
+            1 + self.convergence_key.write_to(output)
+        }
+    }
+
+    pub struct MixedScheme {
+        pub(super) ops: super::symmetric08::Key,
+    }
+
+    impl InternalScheme for MixedScheme {
+        fn chunk_key(&self) -> Result<ChunkKey> {
+            self.ops.chunk_key()
+        }
+
+        fn index_key(&self) -> Result<IndexKey> {
+            self.ops.index_key()
+        }
+
+        fn storage_key(&self) -> Result<StorageKey> {
+            self.chunk_key().map(|ck| StorageKey(ck.0))
+        }
+
+        fn read_key(&self, _raw_head: &[u8]) -> InternalKey {
+            unreachable!()
+        }
+
+        fn write_key(&self, raw_head: &mut [u8]) -> usize {
+            let output = Mode::Mixed08.write_to(raw_head);
+            1 + self.ops.master_key().write_to(output)
+        }
+    }
+
+    #[derive(Copy, Clone)]
+    pub(super) enum Mode {
+        Mixed08 = 0,
+        Symmetric = 1,
+    }
+
+    impl TryFrom<u8> for Mode {
+        type Error = CryptoError;
+
+        fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
+            use Mode::*;
+
+            match value {
+                0 => Ok(Mixed08),
+                1 => Ok(Symmetric),
+                _ => Err(CryptoError::Fatal),
+            }
+        }
+    }
+
+    impl Mode {
+        pub(super) fn read_with_mode(header: &[u8]) -> InternalKey {
+            let mode = Self::try_from(header[0]).unwrap();
+            let k: RawKey = header[1..].into();
+
+            match mode {
+                Mode::Symmetric => Arc::new(Symmetric::new(k)),
+                Mode::Mixed08 => Arc::new(MixedScheme {
+                    ops: super::symmetric08::Key::with_key(k),
+                }),
+            }
+        }
+
+        pub(super) fn write_to<'buf>(&self, output: &'buf mut [u8]) -> &'buf mut [u8] {
+            output[0] = *self as u8;
+            &mut output[1..]
+        }
+    }
+
+    pub struct SymmetricOps(pub RawKey);
+
+    impl ICryptoOps for SymmetricOps {
+        #[inline]
+        fn encrypt_chunk(
+            &self,
+            object: ObjectId,
+            offs: u32,
+            key: &Digest,
+            data: &mut [u8],
+        ) -> ChunkPointer {
+            let aead = get_aead((*key).into());
+
+            let ring_tag = aead
+                .seal_in_place_separate_tag(
+                    aead::Nonce::assume_unique_for_key(Nonce::default()),
+                    aead::Aad::from(&object),
+                    data,
+                )
+                .unwrap();
+
+            let mut tag = Tag::default();
+            tag.copy_from_slice(ring_tag.as_ref());
+
+            RawChunkPointer {
+                size: data.len() as u32,
+                key: *key,
+                offs,
+                object,
+                tag,
+            }
+            .into()
+        }
+
+        #[inline]
+        fn decrypt_chunk<'buf>(
+            &self,
+            target: &'buf mut [u8],
+            source: &[u8],
+            chunk_ptr: &ChunkPointer,
+        ) -> &'buf mut [u8] {
+            let chunk = chunk_ptr.as_raw();
+            let size = chunk.size as usize;
+            let cyphertext_size = size + chunk.tag.len();
+
+            assert!(target.len() >= cyphertext_size);
+
+            let start = chunk.offs as usize;
+            let end = start + size;
+
+            target[..size].copy_from_slice(&source[start..end]);
+            target[size..cyphertext_size].copy_from_slice(&chunk.tag);
+
+            let aead = get_aead(chunk.key.into());
+            aead.open_in_place(
+                aead::Nonce::assume_unique_for_key(Nonce::default()),
+                aead::Aad::from(&chunk.object),
+                &mut target[..cyphertext_size],
+            )
+            .unwrap();
+
+            &mut target[..size]
+        }
+
+        #[inline]
+        fn hash(&self, content: &[u8]) -> Digest {
+            let mut output = Digest::default();
+            output.copy_from_slice(blake3::keyed_hash(self.0.expose_secret(), content).as_bytes());
+
+            output
+        }
+
+        fn hasher(&self) -> Hasher {
+            blake3::Hasher::new_keyed(self.0.expose_secret())
+        }
     }
 }
 
@@ -102,262 +368,6 @@ fn seal_header(master_key: &RawKey, open: OpenHeader) -> Result<SealedHeader> {
 
     Ok(SealedHeader(output))
 }
-
-impl Argon2UserPass {
-    pub(crate) fn with_credentials(username: SecretString, password: SecretString) -> Result<Self> {
-        let master_key = derive_argon2(
-            b"",
-            username.expose_secret().as_bytes(),
-            password.expose_secret().as_bytes(),
-        )?;
-        Ok(Argon2UserPass {
-            master_key,
-            username,
-            password,
-        })
-    }
-}
-
-impl HeaderScheme for Argon2UserPass {
-    fn root_object_id(&self) -> Result<ObjectId> {
-        root_object_id(&self.master_key)
-    }
-
-    fn open_root(&self, sealed: SealedHeader) -> Result<OpenHeader> {
-        let mut buf = sealed.0;
-
-        let aead = get_aead(root_key(&self.master_key)?);
-        let nonce = {
-            let mut buf = Nonce::default();
-            buf.copy_from_slice(&sealed[HEADER_CYPHERTEXT..]);
-            aead::Nonce::assume_unique_for_key(buf)
-        };
-
-        let _ = aead
-            .open_in_place(nonce, aead::Aad::empty(), &mut buf[..HEADER_CYPHERTEXT])
-            .map_err(CryptoError::from)?;
-
-        Ok(OpenHeader(buf))
-    }
-
-    fn open_header<IS: InternalScheme>(
-        self: Arc<Self>,
-        header: SealedHeader,
-        internal: &IS,
-    ) -> Result<(RawChunkPointer, KeyingScheme<Self, InternalKey>)>
-    where
-        Self: Sized + 'static,
-    {
-        match self.open_root(header.clone()) {
-            Ok(open) => {
-                let (pos, root_ptr) = RawChunkPointer::parse(&open);
-                let convergence = internal.read_key(&open[pos..]);
-
-                Ok((
-                    root_ptr,
-                    KeyingScheme {
-                        header: self,
-                        convergence,
-                    },
-                ))
-            }
-            Err(_) => {
-                // open and transparently upgrade unsafe header format to this
-                let old_key = super::symmetric08::Key::from_credentials(
-                    self.username.clone(),
-                    self.password.clone(),
-                )?;
-                let (root_ptr, ops) = old_key.open_root(header)?;
-
-                Ok((
-                    root_ptr,
-                    KeyingScheme {
-                        header: self,
-                        convergence: Arc::new(MixedScheme { ops }),
-                    },
-                ))
-            }
-        }
-    }
-
-    fn seal_root(&self, open: OpenHeader) -> Result<SealedHeader> {
-        seal_header(&self.master_key, open)
-    }
-}
-
-impl Symmetric {
-    pub(crate) fn random() -> Result<Self> {
-        let random = SystemRandom::new();
-
-        Ok(Self {
-            convergence_key: generate_key(&random)?,
-        })
-    }
-}
-
-impl InternalScheme for Symmetric {
-    fn chunk_key(&self) -> Result<ChunkKey> {
-        Ok(ChunkKey::new(SymmetricOps(derive_subkey(
-            &self.convergence_key,
-            "zerostash.com 2022 chunk key",
-        )?)))
-    }
-
-    fn index_key(&self) -> Result<IndexKey> {
-        Ok(IndexKey::new(SymmetricOps(derive_subkey(
-            &self.convergence_key,
-            "zerostash.com 2022 index key",
-        )?)))
-    }
-
-    fn storage_key(&self) -> Result<StorageKey> {
-        Ok(StorageKey::new(SymmetricOps(derive_subkey(
-            &self.convergence_key,
-            "zerostash.com 2022 storage key",
-        )?)))
-    }
-
-    fn read_key(&self, raw_head: &[u8]) -> InternalKey {
-        Mode::read_with_mode(raw_head)
-    }
-
-    fn write_key(&self, raw_head: &mut [u8]) -> usize {
-        let output = Mode::Symmetric.write_to(raw_head);
-        1 + self.convergence_key.write_to(output)
-    }
-}
-
-impl InternalScheme for MixedScheme {
-    fn chunk_key(&self) -> Result<ChunkKey> {
-        self.ops.chunk_key()
-    }
-
-    fn index_key(&self) -> Result<IndexKey> {
-        self.ops.index_key()
-    }
-
-    fn storage_key(&self) -> Result<StorageKey> {
-        self.chunk_key().map(|ck| StorageKey(ck.0))
-    }
-
-    fn read_key(&self, _raw_head: &[u8]) -> InternalKey {
-        unreachable!()
-    }
-
-    fn write_key(&self, raw_head: &mut [u8]) -> usize {
-        let output = Mode::Mixed08.write_to(raw_head);
-        1 + self.ops.master_key().write_to(output)
-    }
-}
-
-impl ICryptoOps for SymmetricOps {
-    #[inline]
-    fn encrypt_chunk(
-        &self,
-        object: ObjectId,
-        offs: u32,
-        key: &Digest,
-        data: &mut [u8],
-    ) -> ChunkPointer {
-        let aead = get_aead((*key).into());
-
-        let ring_tag = aead
-            .seal_in_place_separate_tag(
-                aead::Nonce::assume_unique_for_key(Nonce::default()),
-                aead::Aad::from(&object),
-                data,
-            )
-            .unwrap();
-
-        let mut tag = Tag::default();
-        tag.copy_from_slice(ring_tag.as_ref());
-
-        RawChunkPointer {
-            size: data.len() as u32,
-            key: *key,
-            offs,
-            object,
-            tag,
-        }
-        .into()
-    }
-
-    #[inline]
-    fn decrypt_chunk<'buf>(
-        &self,
-        target: &'buf mut [u8],
-        source: &[u8],
-        chunk_ptr: &ChunkPointer,
-    ) -> &'buf mut [u8] {
-        let chunk = chunk_ptr.as_raw();
-        let size = chunk.size as usize;
-        let cyphertext_size = size + chunk.tag.len();
-
-        assert!(target.len() >= cyphertext_size);
-
-        let start = chunk.offs as usize;
-        let end = start + size;
-
-        target[..size].copy_from_slice(&source[start..end]);
-        target[size..cyphertext_size].copy_from_slice(&chunk.tag);
-
-        let aead = get_aead(chunk.key.into());
-        aead.open_in_place(
-            aead::Nonce::assume_unique_for_key(Nonce::default()),
-            aead::Aad::from(&chunk.object),
-            &mut target[..cyphertext_size],
-        )
-        .unwrap();
-
-        &mut target[..size]
-    }
-
-    #[inline]
-    fn hash(&self, content: &[u8]) -> Digest {
-        let mut output = Digest::default();
-        output.copy_from_slice(blake3::keyed_hash(self.0.expose_secret(), content).as_bytes());
-
-        output
-    }
-
-    fn hasher(&self) -> Hasher {
-        blake3::Hasher::new_keyed(self.0.expose_secret())
-    }
-}
-
-impl TryFrom<u8> for Mode {
-    type Error = CryptoError;
-
-    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
-        use Mode::*;
-
-        match value {
-            0 => Ok(Mixed08),
-            1 => Ok(Symmetric),
-            _ => Err(CryptoError::Fatal),
-        }
-    }
-}
-
-impl Mode {
-    pub(super) fn read_with_mode(header: &[u8]) -> InternalKey {
-        let mode = Self::try_from(header[0]).unwrap();
-        let k: RawKey = header[1..].into();
-
-        match mode {
-            Mode::Symmetric => Arc::new(Symmetric { convergence_key: k }),
-            Mode::Mixed08 => Arc::new(MixedScheme {
-                ops: super::symmetric08::Key::with_key(k),
-            }),
-        }
-    }
-
-    pub(super) fn write_to<'buf>(&self, output: &'buf mut [u8]) -> &'buf mut [u8] {
-        output[0] = *self as u8;
-        &mut output[1..]
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;

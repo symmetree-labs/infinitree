@@ -178,7 +178,7 @@ extern crate serde_derive;
 pub mod backends;
 mod chunks;
 mod compress;
-mod crypto;
+pub mod crypto;
 pub mod fields;
 mod id;
 pub mod index;
@@ -187,7 +187,7 @@ pub mod tree;
 
 pub use anyhow;
 pub use chunks::ChunkPointer;
-pub use crypto::public::*;
+pub use crypto as keys;
 pub use crypto::{Digest, Hasher, Key};
 pub use index::Index;
 pub use infinitree_macros::Index;

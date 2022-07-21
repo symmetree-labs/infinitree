@@ -77,6 +77,11 @@ macro_rules! key_type {
     };
 }
 
-key_type!(IndexKey);
-key_type!(ChunkKey);
-key_type!(StorageKey);
+pub(crate) use private::*;
+mod private {
+    use super::*;
+
+    key_type!(IndexKey);
+    key_type!(ChunkKey);
+    key_type!(StorageKey);
+}

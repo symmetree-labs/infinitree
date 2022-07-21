@@ -16,30 +16,6 @@ use libsodium_sys::{
 use secrecy::{ExposeSecret, SecretString};
 use std::sync::Arc;
 
-/// A key pair for crypto_box-based schemes.
-pub struct Keypair {
-    pub public_key: RawKey,
-    pub secret_key: RawKey,
-}
-
-impl Keypair {
-    /// Generate a new key pair.
-    pub fn generate() -> Result<Self> {
-        let mut pk = [0u8; crypto_box_PUBLICKEYBYTES as usize];
-        let mut sk = [0u8; crypto_box_SECRETKEYBYTES as usize];
-
-        let ok = unsafe { crypto_box_keypair(pk.as_mut_ptr(), sk.as_mut_ptr()) };
-        if ok != 0 {
-            Err(CryptoError::Fatal)
-        } else {
-            Ok(Keypair {
-                public_key: pk.into(),
-                secret_key: sk.into(),
-            })
-        }
-    }
-}
-
 /// Asymmetric-key based encryption scheme to create archives with a
 /// write-only storage segment.
 ///
@@ -59,17 +35,6 @@ impl Keypair {
 /// re-encryption, converting to and from `CryptoBoxStorage` is not
 /// supported.
 pub type StorageOnly = KeyingScheme<Argon2UserPass, CryptoBoxStorage>;
-
-pub struct CryptoBoxStorage {
-    inner: Symmetric,
-    storage: Arc<InstanceKeys>,
-}
-struct CryptoBoxOps(CryptoOps, Arc<InstanceKeys>);
-struct InstanceKeys {
-    pk: RawKey,
-    sk: Option<RawKey>,
-}
-
 impl StorageOnly {
     /// Create a crypto backend that only allows encryption through
     /// [`Infinitree::storage_writer`](crate::Infinitree::storage_writer).
@@ -120,42 +85,82 @@ impl StorageOnly {
     }
 }
 
-impl InternalScheme for CryptoBoxStorage {
-    fn chunk_key(&self) -> Result<ChunkKey> {
-        self.inner.chunk_key()
-    }
+/// A key pair for crypto_box-based schemes.
+pub struct Keypair {
+    pub public_key: RawKey,
+    pub secret_key: RawKey,
+}
 
-    fn index_key(&self) -> Result<IndexKey> {
-        self.inner.index_key()
-    }
+impl Keypair {
+    /// Generate a new key pair.
+    pub fn generate() -> Result<Self> {
+        let mut pk = [0u8; crypto_box_PUBLICKEYBYTES as usize];
+        let mut sk = [0u8; crypto_box_SECRETKEYBYTES as usize];
 
-    fn storage_key(&self) -> Result<StorageKey> {
-        Ok(StorageKey(Arc::new(CryptoBoxOps(
-            self.inner.storage_key()?.into_inner(),
-            self.storage.clone(),
-        ))))
-    }
-
-    fn read_key(&self, raw_head: &[u8]) -> InternalKey {
-        // skipping mode detection
-        let convergence_key = raw_head[1..].into();
-        let inner = Symmetric { convergence_key };
-
-        let pk: RawKey = raw_head[1 + KEY_SIZE..].into();
-        assert_eq!(pk.expose_secret(), self.storage.pk.expose_secret());
-
-        Arc::new(CryptoBoxStorage {
-            inner,
-            storage: self.storage.clone(),
-        })
-    }
-
-    fn write_key(&self, raw_head: &mut [u8]) -> usize {
-        let pos = self.inner.write_key(raw_head);
-        pos + self.storage.pk.write_to(&mut raw_head[pos..])
+        let ok = unsafe { crypto_box_keypair(pk.as_mut_ptr(), sk.as_mut_ptr()) };
+        if ok != 0 {
+            Err(CryptoError::Fatal)
+        } else {
+            Ok(Keypair {
+                public_key: pk.into(),
+                secret_key: sk.into(),
+            })
+        }
     }
 }
 
+pub(super) use private::*;
+mod private {
+    use super::*;
+
+    pub struct CryptoBoxStorage {
+        pub(super) inner: Symmetric,
+        pub(super) storage: Arc<InstanceKeys>,
+    }
+
+    impl InternalScheme for CryptoBoxStorage {
+        fn chunk_key(&self) -> Result<ChunkKey> {
+            self.inner.chunk_key()
+        }
+
+        fn index_key(&self) -> Result<IndexKey> {
+            self.inner.index_key()
+        }
+
+        fn storage_key(&self) -> Result<StorageKey> {
+            Ok(StorageKey(Arc::new(CryptoBoxOps(
+                self.inner.storage_key()?.into_inner(),
+                self.storage.clone(),
+            ))))
+        }
+
+        fn read_key(&self, raw_head: &[u8]) -> InternalKey {
+            // skipping mode detection
+            let convergence_key = raw_head[1..].into();
+            let inner = Symmetric::new(convergence_key);
+
+            let pk: RawKey = raw_head[1 + KEY_SIZE..].into();
+            assert_eq!(pk.expose_secret(), self.storage.pk.expose_secret());
+
+            Arc::new(CryptoBoxStorage {
+                inner,
+                storage: self.storage.clone(),
+            })
+        }
+
+        fn write_key(&self, raw_head: &mut [u8]) -> usize {
+            let pos = self.inner.write_key(raw_head);
+            pos + self.storage.pk.write_to(&mut raw_head[pos..])
+        }
+    }
+}
+
+struct InstanceKeys {
+    pk: RawKey,
+    sk: Option<RawKey>,
+}
+
+struct CryptoBoxOps(CryptoOps, Arc<InstanceKeys>);
 impl ICryptoOps for CryptoBoxOps {
     #[inline]
     fn encrypt_chunk(

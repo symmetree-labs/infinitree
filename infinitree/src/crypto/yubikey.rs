@@ -65,96 +65,103 @@ impl YubikeyCR {
     }
 }
 
-pub struct YubikeyHeader {
-    master_key: RawKey,
-    ykconfig: yubico_manager::config::Config,
-}
+pub(crate) use private::*;
+mod private {
+    use super::*;
 
-/// blake3_kdf(ctx, master_key || yk_hmac_response(challenge))
-fn header_key(
-    master_key: &RawKey,
-    challenge: Challenge,
-    config: yubico_manager::config::Config,
-) -> Result<RawKey> {
-    let mut k = [0; KEY_SIZE + size_of::<Response>()];
-
-    let mut yk = Yubico::new();
-    let resp = yk
-        .challenge_response_hmac(&challenge, config)
-        .map_err(|_| CryptoError::Fatal)?
-        .0;
-
-    k[..KEY_SIZE].copy_from_slice(master_key.expose_secret());
-    k[KEY_SIZE..].copy_from_slice(&resp);
-
-    Ok(blake3::derive_key("zerostash.com 2022 yubikey challenge-response", &k).into())
-}
-
-impl HeaderScheme for YubikeyHeader {
-    fn open_root(&self, header: SealedHeader) -> Result<OpenHeader> {
-        let mut sealed = header.0;
-
-        let mut challenge = [0; size_of::<Challenge>()];
-        challenge.copy_from_slice(&sealed[HEADER_CYPHERTEXT + size_of::<Nonce>()..]);
-
-        let aead = get_aead(header_key(
-            &self.master_key,
-            challenge,
-            self.ykconfig.clone(),
-        )?);
-        let nonce = {
-            let mut buf = Nonce::default();
-            buf.copy_from_slice(&sealed[HEADER_CYPHERTEXT..HEADER_CYPHERTEXT + size_of::<Nonce>()]);
-            aead::Nonce::assume_unique_for_key(buf)
-        };
-
-        let _ = aead
-            .open_in_place(nonce, aead::Aad::empty(), &mut sealed[..HEADER_CYPHERTEXT])
-            .map_err(CryptoError::from)?;
-
-        Ok(OpenHeader(sealed))
+    pub struct YubikeyHeader {
+        pub(super) master_key: RawKey,
+        pub(super) ykconfig: yubico_manager::config::Config,
     }
 
-    fn seal_root(&self, header: OpenHeader) -> Result<SealedHeader> {
-        let mut output = header.0;
-        let random = SystemRandom::new();
-        let nonce = {
-            let mut buf = Nonce::default();
-            random.fill(&mut buf)?;
-            aead::Nonce::assume_unique_for_key(buf)
-        };
-        let challenge = {
-            let mut buf = [0; size_of::<Challenge>()];
-            random.fill(&mut buf)?;
-            buf
-        };
+    /// blake3_kdf(ctx, master_key || yk_hmac_response(challenge))
+    fn header_key(
+        master_key: &RawKey,
+        challenge: Challenge,
+        config: yubico_manager::config::Config,
+    ) -> Result<RawKey> {
+        let mut k = [0; KEY_SIZE + size_of::<Response>()];
 
-        //
-        // Copy the n-once before it gets eaten by the aead.
-        output[HEADER_CYPHERTEXT..HEADER_CYPHERTEXT + size_of::<Nonce>()]
-            .copy_from_slice(nonce.as_ref());
+        let mut yk = Yubico::new();
+        let resp = yk
+            .challenge_response_hmac(&challenge, config)
+            .map_err(|_| CryptoError::Fatal)?
+            .0;
 
-        let aead = get_aead(header_key(
-            &self.master_key,
-            challenge,
-            self.ykconfig.clone(),
-        )?);
-        let tag = aead.seal_in_place_separate_tag(
-            nonce,
-            aead::Aad::empty(),
-            &mut output[..HEADER_PAYLOAD],
-        )?;
+        k[..KEY_SIZE].copy_from_slice(master_key.expose_secret());
+        k[KEY_SIZE..].copy_from_slice(&resp);
 
-        //
-        // Dump tag and challenge
-        output[HEADER_PAYLOAD..HEADER_PAYLOAD + size_of::<Tag>()].copy_from_slice(tag.as_ref());
-        output[HEADER_CYPHERTEXT + size_of::<Nonce>()..].copy_from_slice(&challenge);
-
-        Ok(SealedHeader(output))
+        Ok(blake3::derive_key("zerostash.com 2022 yubikey challenge-response", &k).into())
     }
 
-    fn root_object_id(&self) -> Result<ObjectId> {
-        super::symmetric::root_object_id(&self.master_key)
+    impl HeaderScheme for YubikeyHeader {
+        fn open_root(&self, header: SealedHeader) -> Result<OpenHeader> {
+            let mut sealed = header.0;
+
+            let mut challenge = [0; size_of::<Challenge>()];
+            challenge.copy_from_slice(&sealed[HEADER_CYPHERTEXT + size_of::<Nonce>()..]);
+
+            let aead = get_aead(header_key(
+                &self.master_key,
+                challenge,
+                self.ykconfig.clone(),
+            )?);
+            let nonce = {
+                let mut buf = Nonce::default();
+                buf.copy_from_slice(
+                    &sealed[HEADER_CYPHERTEXT..HEADER_CYPHERTEXT + size_of::<Nonce>()],
+                );
+                aead::Nonce::assume_unique_for_key(buf)
+            };
+
+            let _ = aead
+                .open_in_place(nonce, aead::Aad::empty(), &mut sealed[..HEADER_CYPHERTEXT])
+                .map_err(CryptoError::from)?;
+
+            Ok(OpenHeader(sealed))
+        }
+
+        fn seal_root(&self, header: OpenHeader) -> Result<SealedHeader> {
+            let mut output = header.0;
+            let random = SystemRandom::new();
+            let nonce = {
+                let mut buf = Nonce::default();
+                random.fill(&mut buf)?;
+                aead::Nonce::assume_unique_for_key(buf)
+            };
+            let challenge = {
+                let mut buf = [0; size_of::<Challenge>()];
+                random.fill(&mut buf)?;
+                buf
+            };
+
+            //
+            // Copy the n-once before it gets eaten by the aead.
+            output[HEADER_CYPHERTEXT..HEADER_CYPHERTEXT + size_of::<Nonce>()]
+                .copy_from_slice(nonce.as_ref());
+
+            let aead = get_aead(header_key(
+                &self.master_key,
+                challenge,
+                self.ykconfig.clone(),
+            )?);
+            let tag = aead.seal_in_place_separate_tag(
+                nonce,
+                aead::Aad::empty(),
+                &mut output[..HEADER_PAYLOAD],
+            )?;
+
+            //
+            // Dump tag and challenge
+            output[HEADER_PAYLOAD..HEADER_PAYLOAD + size_of::<Tag>()].copy_from_slice(tag.as_ref());
+            output[HEADER_CYPHERTEXT + size_of::<Nonce>()..].copy_from_slice(&challenge);
+
+            Ok(SealedHeader(output))
+        }
+
+        fn root_object_id(&self) -> Result<ObjectId> {
+            super::symmetric::root_object_id(&self.master_key)
+        }
     }
 }
 
