@@ -1,6 +1,6 @@
 [package]
 name = "infinitree-backends"
-version = "0.8.1"
+version = "0.9.0"
 edition = "2021"
 
 [features]
@@ -9,7 +9,7 @@ rustls = ["reqwest/rustls-tls"]
 native-tls = ["reqwest/native-tls-alpn"]
 
 [dependencies]
-infinitree = { version = "0.8.1", path = "../infinitree" }
+infinitree = { version = "0.9.0", path = "../infinitree" }
 
 serde = "1.0.140"
 serde_derive = "1.0.140"
@@ -24,7 +24,7 @@ tokio = { version = "1.20.0", default-features = false, features = ["rt", "sync"
 futures = "0.3.21"
 
 [dev-dependencies]
-infinitree = { version = "0.8.1", path = "../infinitree", features = ["test"] }
+infinitree = { version = "0.9.0", path = "../infinitree", features = ["test"] }
 tokio = { version = "1.20.0", default-features = false, features = ["rt", "sync", "macros", "rt-multi-thread"] }
 hyper = { version = "0.14.20", features = ["server"] }
 s3-server = "0.2.0"
