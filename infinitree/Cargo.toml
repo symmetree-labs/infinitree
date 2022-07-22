@@ -30,16 +30,16 @@ yubico_manager = { version = "0.9.0", optional = true }
 
 lz4_flex = { version = "0.9.3", default-features = false, features = ["safe-decode", "checked-decode", "frame"] }
 
-scc = "0.8.1"
-flume = "0.10.13"
-lru = "0.7.7"
+scc = "0.8.3"
+flume = "0.10.14"
+lru = "0.7.8"
 thiserror = "1.0.31"
 anyhow = "1.0.58"
 hex = "0.4.3"
 parking_lot = "0.12.1"
 
-serde = { version = "1.0.137", features = ["rc"] }
-serde_derive = "1.0.137"
+serde = { version = "1.0.140", features = ["rc"] }
+serde_derive = "1.0.140"
 serde_with = "2.0.0"
 rmp-serde = "1.1.0"
 
@@ -47,10 +47,10 @@ secrecy = "0.8.0"
 
 infinitree-macros = { version = "0.8.1", path = "../infinitree-macros" }
 
-memmap2 = { version = "0.5.4", optional = true }
+memmap2 = { version = "0.5.5", optional = true }
 
 [dev-dependencies]
-criterion = "0.3.5"
+criterion = "0.3.6"
 paste = "1.0.7"
 
 [[bench]]
