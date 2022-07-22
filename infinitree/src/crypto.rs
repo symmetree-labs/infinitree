@@ -39,7 +39,9 @@
 //! then write data into the `storage` segment of it.
 //!
 //! ```no_run
-//! use infinitree::{*, crypto::*, fields::VersionedMap, backends::Directory};
+//! use infinitree::{*,
+//!                  crypto::*,
+//!                  object::Writer, fields::VersionedMap, backends::Directory};
 //!
 //! let key = UsernamePassword::with_credentials("username".to_string(),
 //!                                              "old_password".to_string()).unwrap();
@@ -53,7 +55,7 @@
 //! let mut writer = tree.storage_writer().unwrap();
 //!
 //! // use the writer to write data
-//! let ptr = writer.write(b"my precious secret");
+//! let ptr = writer.write(b"my precious secret").unwrap();
 //!
 //! // then store it in the index
 //! tree.index().insert("Gollum?".into(), ptr);
