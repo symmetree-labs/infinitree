@@ -34,6 +34,11 @@ use std::sync::Arc;
 /// existing [`ChunkPointer`]s would be invalidated, and would need
 /// re-encryption, converting to and from `CryptoBoxStorage` is not
 /// supported.
+///
+/// # Panics
+///
+/// Opening a tree with an invalid key currently
+/// panics.
 pub type StorageOnly = KeyingScheme<Argon2UserPass, CryptoBoxStorage>;
 impl StorageOnly {
     /// Create a crypto backend that only allows encryption through

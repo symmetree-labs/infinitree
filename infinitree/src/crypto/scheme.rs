@@ -9,6 +9,8 @@ impl<T> KeySource for T where T: 'static + Scheme {}
 /// Key source for all crypto operations.
 pub type Key = Arc<dyn KeySource>;
 
+/// Binds header and internal encryption. This type can only be
+/// instantiated through type aliases.
 pub struct KeyingScheme<H, I> {
     pub(crate) header: Arc<H>,
     pub(crate) convergence: I,
@@ -23,8 +25,14 @@ impl<H, I> KeyingScheme<H, I> {
     }
 }
 
+// Seems like `.into()` doesn't work well for dynamic types, so
+// explicitly define it here
 #[allow(clippy::from_over_into)]
-impl<H: HeaderScheme + 'static, I: InternalScheme + 'static> Into<Key> for KeyingScheme<H, I> {
+impl<H, I> Into<Key> for KeyingScheme<H, I>
+where
+    H: HeaderScheme + 'static,
+    I: InternalScheme + 'static,
+{
     fn into(self) -> Key {
         Arc::new(self)
     }
@@ -68,10 +76,46 @@ where
     }
 }
 
+/// Change the header key on sealing a tree.
+///
+/// You will need to use this key to open a the tree, then create a
+/// commit or reseal to apply the changes.
+///
+/// # Examples
+///
+/// ```no_run
+/// use infinitree::{*, crypto::*, fields::VersionedMap, backends::Directory};
+///
+/// let key = ChangeHeaderKey::swap_on_seal(
+///     UsernamePassword::with_credentials("username".to_string(),
+///                                        "old_password".to_string()).unwrap(),
+///     UsernamePassword::with_credentials("username".to_string(),
+///                                            "new_password".to_string()).unwrap(),
+/// );
+///
+/// let mut tree = Infinitree::<VersionedMap<String, String>>::open(
+///     Directory::new("/storage").unwrap(),
+///     key
+/// ).unwrap();
+///
+/// tree.reseal();
+/// ```
 pub struct ChangeHeaderKey<H, N, I> {
     opener: Arc<H>,
     sealer: Arc<N>,
     convergence: I,
+}
+
+#[allow(clippy::from_over_into)]
+impl<H, N, I> Into<Key> for ChangeHeaderKey<H, N, I>
+where
+    H: HeaderScheme + 'static,
+    N: HeaderScheme + 'static,
+    I: InternalScheme + 'static,
+{
+    fn into(self) -> Key {
+        Arc::new(self)
+    }
 }
 
 impl<H, N, I> ChangeHeaderKey<H, N, I> {
@@ -202,5 +246,59 @@ pub(crate) mod private {
         fn write_key(&self, raw_head: &mut [u8]) -> usize {
             Arc::as_ref(self).write_key(raw_head)
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{crypto::UsernamePassword, fields::VersionedMap, Infinitree};
+
+    #[test]
+    fn change_key() {
+        let storage = crate::backends::test::InMemoryBackend::shared();
+        let old_key = || {
+            UsernamePassword::with_credentials("change_key".to_string(), "old_password".to_string())
+                .unwrap()
+        };
+        let new_key = || {
+            UsernamePassword::with_credentials("change_key".to_string(), "new_password".to_string())
+                .unwrap()
+        };
+
+        // crate a tree and put some data into it
+        {
+            let mut tree =
+                Infinitree::<VersionedMap<usize, usize>>::empty(storage.clone(), old_key())
+                    .unwrap();
+            tree.index().insert(1000, 1000);
+            tree.commit(None).unwrap();
+            tree.index().clear();
+
+            for i in 0..100 {
+                tree.index().insert(i, i + 1);
+            }
+
+            tree.commit(None).unwrap();
+        }
+
+        // change the key and reseal
+        {
+            let key = ChangeHeaderKey::swap_on_seal(old_key(), new_key());
+            let mut tree =
+                Infinitree::<VersionedMap<usize, usize>>::open(storage.clone(), key).unwrap();
+            tree.reseal().unwrap();
+        }
+
+        // the tree now can be opened with the new key
+        let tree =
+            Infinitree::<VersionedMap<usize, usize>>::open(storage.clone(), new_key()).unwrap();
+        tree.load_all().unwrap();
+
+        for i in 0..100 {
+            assert_eq!(i + 1, *tree.index().get(&i).unwrap());
+        }
+
+        assert_eq!(tree.index().len(), 101);
     }
 }

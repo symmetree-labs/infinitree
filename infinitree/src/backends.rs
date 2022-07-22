@@ -1,4 +1,12 @@
-//! Backends work with underlying persistence layers, such as directories, S3, etc.
+//! Backends work with underlying persistence layers.
+//!
+//! The `infinitree` crate only contains the bare minimum to implement
+//! a filesystem-based tree.
+//!
+//! For more interesting backends, such as S3 and LRU caches, please
+//! use the
+//! [`infinitree-backends`](https://docs.rs/infinitree-backends)
+//! crate.
 use crate::object::{ObjectId, ReadObject, WriteObject};
 use std::{io, sync::Arc};
 

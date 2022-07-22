@@ -1,4 +1,73 @@
 //! Encryption key management and secure hashing
+//!
+//! The modules exported are all optional keying schemes that can be
+//! toggled with Cargo features.
+//!
+//! # The default symmetric scheme
+//!
+//! Trees in the simplest case will use the [`UsernamePassword`]
+//! keying scheme, which provides a symmetric encryption mechanism.
+//!
+//! # Asymmetric schemes
+//!
+//! To create a split key that allows differentiating between reader
+//! and writer keys, enable the `cryptobox` Cargo feature. This will
+//! allow you to use an asymmetric scheme to encrypt data in the
+//! `storage` segments of your tree, but keep the indexes
+//! symmetrically encrypted.
+//!
+//! # Hardware-bound encryption
+//!
+//! Infinitree has native support for using a Yubikey's
+//! Challenge-Response HMAC-SHA1 mode to encrypt the header of the
+//! tree, enabled by the `yubikey` Cargo feature.
+//!
+//! To allow for configuring the Yubikey, the `yubico_manager` crate
+//! is re-exported.
+//!
+//! # Changing keys
+//!
+//! Changing of the header key is supported through by creating a
+//! special key through [`ChangeHeaderKey::swap_on_seal`] constructor.
+//!
+//! Because changing the internal keys might potentially require
+//! re-encrypting the entire archive in a way that's not possible to
+//! do with the Infinitree library, the implementation of such a
+//! change is up to your specific use case.
+//!
+//! For instance, let's assume you crate a symmetrically keyed tree,
+//! then write data into the `storage` segment of it.
+//!
+//! ```no_run
+//! use infinitree::{*, crypto::*, fields::VersionedMap, backends::Directory};
+//!
+//! let key = UsernamePassword::with_credentials("username".to_string(),
+//!                                              "old_password".to_string()).unwrap();
+//!
+//! let mut tree = Infinitree::<VersionedMap<String, ChunkPointer>>::open(
+//!     Directory::new("/storage").unwrap(),
+//!     key
+//! ).unwrap();
+//!
+//! // get access to the custom `storage` segment of the tree
+//! let mut writer = tree.storage_writer().unwrap();
+//!
+//! // use the writer to write data
+//! let ptr = writer.write(b"my precious secret");
+//!
+//! // then store it in the index
+//! tree.index().insert("Gollum?".into(), ptr);
+//!
+//! tree.commit("My first shenanigans");
+//! ```
+//!
+//! Changing the internal key at this point to
+//! e.g. `cryptobox::StorageOnly` would mean that all existing data in
+//! the stash, referenced only through [`ChunkPointer`](crate::ChunkPointer)s is now
+//! inaccessible.
+//!
+//! For the sake of straightforward use and space efficiency of chunk
+//! references, this is not permitted.
 pub use blake3::Hasher;
 use ring::aead;
 pub(crate) use ring::rand::{SecureRandom, SystemRandom};

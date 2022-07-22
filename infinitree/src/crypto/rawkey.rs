@@ -2,9 +2,9 @@ use super::CryptoError;
 use secrecy::{ExposeSecret, Secret};
 use std::{str::FromStr, sync::Arc};
 
-pub const KEY_SIZE: usize = 32;
+pub(super) const KEY_SIZE: usize = 32;
 
-/// A cryptographic key
+/// A raw cryptographic key
 #[derive(Clone)]
 pub struct RawKey(Arc<Secret<[u8; KEY_SIZE]>>);
 

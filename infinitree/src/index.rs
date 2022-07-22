@@ -67,6 +67,7 @@ pub(crate) type TransactionPointer = (CommitId, Field, Stream);
 /// A list of transactions, represented in order, for versions and fields
 pub(crate) type TransactionList = Vec<TransactionPointer>;
 
+/// Marker trait for contiguous write operations.
 pub trait Transaction: Send + Sync + std::io::Write {}
 impl<T> Transaction for T where T: Send + Sync + std::io::Write {}
 
