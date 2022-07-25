@@ -1,7 +1,14 @@
 [package]
 name = "infinitree-backends"
+authors = ["Peter Parkanyi <p@symmetree.dev>"]
+description = "Embedded, encrypted database with tiered cache -- backends"
 version = "0.9.0"
-edition = "2021"
+keywords = ["crypto", "database", "cache", "s3", "rocksdb"]
+categories = ["database-implementations", "concurrency", "data-structures", "algorithms", "caching"]
+homepage = "https://symmetree.dev"
+repository = "https://github.com/symmetree-labs/infinitree"
+license = "MIT OR Apache-2.0"
+edition= "2021"
 
 [features]
 default = []
