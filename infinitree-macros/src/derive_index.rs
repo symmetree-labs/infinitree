@@ -217,7 +217,7 @@ fn should_skip(attr: &Attribute) -> syn::Result<bool> {
         Ok(Some(NestedMeta::Meta(Meta::Path(path)))) => path,
         _ => {
             return Err(syn::Error::new_spanned(
-                &attr,
+                attr,
                 "unexpected attribute; expected `skip`",
             ))
         }

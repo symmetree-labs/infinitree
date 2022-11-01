@@ -37,7 +37,7 @@ impl UsernamePassword {
         let rand = ring::rand::SystemRandom::new();
         let mut k = [0; 32];
         rand.fill(&mut k)?;
-        Ok(hex::encode(&k))
+        Ok(hex::encode(k))
     }
 
     pub fn with_credentials(

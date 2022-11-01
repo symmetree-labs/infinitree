@@ -149,7 +149,7 @@ impl Backend for Directory {
             Some(handle) => Ok(Object::with_id(*id, ReadBuffer::with_inner(handle)).into()),
             None => {
                 let path = self.target.join(id.to_string());
-                let buffer = Arc::new(get_buf(&path)?);
+                let buffer = Arc::new(get_buf(path)?);
 
                 self.read_lru.lock().unwrap().put(*id, buffer.clone());
                 Ok(Object::with_id(*id, ReadBuffer::with_inner(buffer)).into())
