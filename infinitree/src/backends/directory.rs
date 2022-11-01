@@ -4,6 +4,7 @@ use crate::object::{Object, ObjectId, ReadBuffer, ReadObject, WriteObject};
 use lru::LruCache;
 use std::{
     fs,
+    num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -110,10 +111,13 @@ pub struct Directory {
 impl Directory {
     /// This is equivalent to `Directory::with_open_file_limit(target, 256)`
     pub fn new(target: impl AsRef<Path>) -> Result<Arc<Directory>> {
-        Self::with_open_file_limit(target, 256)
+        Self::with_open_file_limit(target, 256.try_into().unwrap())
     }
 
-    pub fn with_open_file_limit(target: impl AsRef<Path>, limit: usize) -> Result<Arc<Directory>> {
+    pub fn with_open_file_limit(
+        target: impl AsRef<Path>,
+        limit: NonZeroUsize,
+    ) -> Result<Arc<Directory>> {
         std::fs::create_dir_all(&target)?;
         let absolute = target.as_ref().canonicalize()?;
 
