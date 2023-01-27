@@ -261,7 +261,7 @@ mod test {
         let key =
             Key::from_credentials("test".to_string().into(), "test".to_string().into()).unwrap();
 
-        let header = key.clone().seal_root(&Default::default(), &key).unwrap();
+        let header = key.seal_root(&Default::default(), &key).unwrap();
 
         assert_eq!(header, TEST_SEALED_HEADER);
     }
@@ -279,7 +279,7 @@ mod test {
         let crypto = ObjectOperations::chunks(key.into());
         let mut obj = WriteObject::default();
 
-        let mut encrypted = cleartext.clone();
+        let mut encrypted = *cleartext;
         let cp = crypto.encrypt_chunk(*obj.id(), 0, hash, &mut encrypted);
         obj.write(&encrypted).unwrap();
 

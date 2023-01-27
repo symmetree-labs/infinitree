@@ -519,7 +519,7 @@ mod test {
         let crypto = SymmetricOps(key.into());
         let mut obj = WriteObject::default();
 
-        let mut encrypted = cleartext.clone();
+        let mut encrypted = *cleartext;
         let cp = crypto.encrypt_chunk(*obj.id(), 0, hash, &mut encrypted);
         obj.write(&encrypted).unwrap();
 

@@ -205,4 +205,4 @@ use rmp_serde::Deserializer;
 pub const BLOCK_SIZE: usize = 4 * 1024 * 1024;
 
 #[cfg(test)]
-const TEST_DATA_DIR: &'static str = "../test_data";
+const TEST_DATA_DIR: &str = "../test_data";

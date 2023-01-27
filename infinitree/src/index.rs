@@ -225,7 +225,7 @@ pub(crate) mod test {
     pub(crate) fn store_then_load<T: Send + Sync, S: Strategy<T> + Store + Load>(
         mut store: S,
         mut load: S,
-    ) -> () {
+    ) {
         use crate::{backends, crypto, object::AEADWriter};
         use std::sync::Arc;
 

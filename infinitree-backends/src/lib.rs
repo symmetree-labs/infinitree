@@ -39,7 +39,7 @@ pub(crate) fn block_on<O>(fut: impl Future<Output = O>) -> O {
 mod test {
     use infinitree::{backends::Backend, object::WriteObject};
 
-    pub(crate) const TEST_DATA_DIR: &'static str = "../test_data";
+    pub(crate) const TEST_DATA_DIR: &str = "../test_data";
 
     pub(crate) fn write_and_wait_for_commit(backend: &impl Backend, object: &WriteObject) {
         backend.write_object(object).unwrap();

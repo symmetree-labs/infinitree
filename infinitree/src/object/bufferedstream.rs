@@ -314,7 +314,7 @@ mod tests {
 
         let mut buffer2 = vec![0u8; SIZE];
         chunks
-            .open_reader(AEADReader::new(backend.clone(), key.chunk_key().unwrap()))
+            .open_reader(AEADReader::new(backend, key.chunk_key().unwrap()))
             .read(&mut buffer2)
             .unwrap();
 

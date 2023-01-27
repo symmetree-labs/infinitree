@@ -138,7 +138,7 @@ impl fmt::Display for Region {
             DoAms3 => write!(f, "ams3"),
             DoSgp1 => write!(f, "sgp1"),
             DoFra1 => write!(f, "fra1"),
-            Custom { ref region, .. } => write!(f, "{}", region),
+            Custom { ref region, .. } => write!(f, "{region}"),
         }
     }
 }

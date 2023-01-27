@@ -300,7 +300,7 @@ mod test {
         use std::io::Write;
 
         let mut obj = WriteObject::default();
-        let mut encrypted = CLEARTEXT.clone();
+        let mut encrypted = *CLEARTEXT;
 
         let cp = crypto.encrypt_chunk(*obj.id(), 0, HASH, &mut encrypted);
         obj.write(&encrypted).unwrap();

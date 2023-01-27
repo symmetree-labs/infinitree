@@ -292,7 +292,7 @@ mod test {
 
         // the tree now can be opened with the new key
         let tree =
-            Infinitree::<VersionedMap<usize, usize>>::open(storage.clone(), new_key()).unwrap();
+            Infinitree::<VersionedMap<usize, usize>>::open(storage, new_key()).unwrap();
         tree.load_all().unwrap();
 
         for i in 0..100 {

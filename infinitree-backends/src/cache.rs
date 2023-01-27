@@ -276,7 +276,7 @@ mod test {
 
         let backend = Cache::new(
             &data_root,
-            NonZeroUsize::new(1 * infinitree::BLOCK_SIZE).unwrap(),
+            NonZeroUsize::new(infinitree::BLOCK_SIZE).unwrap(),
             InMemoryBackend::shared(),
         )
         .unwrap();

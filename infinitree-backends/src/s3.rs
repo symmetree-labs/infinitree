@@ -73,7 +73,6 @@ where
             Ok(_) => true,
             Err(e) => !e.is_cancelled(),
         })
-        .into_iter()
         .collect::<std::result::Result<Vec<_>, _>>()
     }
 
@@ -137,7 +136,7 @@ impl S3 {
     ) -> Result<Arc<Self>> {
         let (bucket_name, base_path) = match bucket.as_ref().split_once('/') {
             Some((bucket, "")) => (bucket.to_string(), "".to_string()),
-            Some((bucket, path)) => (bucket.to_string(), format!("{}/", path)),
+            Some((bucket, path)) => (bucket.to_string(), format!("{path}/")),
             None => (bucket.as_ref().to_string(), "".to_string()),
         };
 
@@ -261,8 +260,8 @@ mod test {
     };
     use tokio::task;
 
-    const AWS_ACCESS_KEY_ID: &'static str = "MEEMIEW3EEKI8IEY1U";
-    const AWS_SECRET_ACCESS_KEY_ID: &'static str = "noh8xah2thohv7laehei2lahBuno5FameiNi";
+    const AWS_ACCESS_KEY_ID: &str = "MEEMIEW3EEKI8IEY1U";
+    const AWS_SECRET_ACCESS_KEY_ID: &str = "noh8xah2thohv7laehei2lahBuno5FameiNi";
 
     const SERVER_ADDR_RW: ([u8; 4], u16) = ([127, 0, 0, 1], 12312);
     const SERVER_ADDR_RO: ([u8; 4], u16) = ([127, 0, 0, 1], 12313);
@@ -279,7 +278,7 @@ mod test {
 
         let server = {
             let service = service.into_shared();
-            let listener = TcpListener::bind(&addr).unwrap();
+            let listener = TcpListener::bind(addr).unwrap();
             let make_service: _ =
                 make_service_fn(move |_| future::ready(Ok::<_, anyhow::Error>(service.clone())));
             Server::from_tcp(listener).unwrap().serve(make_service)
@@ -293,11 +292,7 @@ mod test {
         let addr = SocketAddr::from(SERVER_ADDR_RW);
         setup_s3_server(&addr);
 
-        let backend = S3::new(
-            format!("http://{}", addr.to_string()).parse().unwrap(),
-            "bucket",
-        )
-        .unwrap();
+        let backend = S3::new(format!("http://{addr}").parse().unwrap(), "bucket").unwrap();
 
         let mut object = WriteObject::default();
         let id_2 = ObjectId::from_bytes(b"1234567890abcdef1234567890abcdef");
@@ -317,11 +312,7 @@ mod test {
         let addr = SocketAddr::from(SERVER_ADDR_RO);
         setup_s3_server(&addr);
 
-        let backend = S3::new(
-            format!("http://{}", addr.to_string()).parse().unwrap(),
-            "bucket",
-        )
-        .unwrap();
+        let backend = S3::new(format!("http://{addr}").parse().unwrap(), "bucket").unwrap();
 
         let id = ObjectId::from_bytes(b"2222222222abcdef1234567890abcdef");
 

@@ -265,7 +265,7 @@ mod test {
         assert_eq!(m.insert_with(2, || second.clone()), second.clone().into());
 
         // get first
-        assert_eq!(m.get(&1), Some(first.clone().into()));
+        assert_eq!(m.get(&1), Some(first.into()));
 
         // contains
         assert_eq!(m.contains(&1), true);
