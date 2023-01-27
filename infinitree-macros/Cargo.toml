@@ -12,15 +12,15 @@ edition= "2021"
 readme="../README.md"
 
 [dependencies]
-proc-macro-crate = "1.2.1"
+proc-macro-crate = "1.3.0"
 proc-macro-error = "1.0.4"
-proc-macro2 = "1.0.47"
-quote = "1.0.21"
-syn = "1.0.103"
+proc-macro2 = "1.0.50"
+quote = "1.0.23"
+syn = "1.0.107"
 
 [dev-dependencies]
 infinitree = { path = "../infinitree", version = "0.9.0" }
-serde = "1.0.147"
+serde = "1.0.152"
 
 [lib]
 proc-macro = true
