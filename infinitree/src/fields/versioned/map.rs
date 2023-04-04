@@ -476,7 +476,7 @@ where
     }
 }
 
-impl<K, V> Collection for LocalField<VersionedMap<K, V>>
+impl<K, V> Collection for VersionedMap<K, V>
 where
     K: Key,
     V: Value,
@@ -503,22 +503,22 @@ where
         // therefore:
         // 1. do not insert a key if it already exists
         // 2. do not restore a removed key
-        let _ = self.field.base.insert(record.0, record.1);
+        let _ = self.base.insert(record.0, record.1);
     }
 }
 
-impl<K, V> Store for LocalField<VersionedMap<K, V>>
+impl<K, V> Store for VersionedMap<K, V>
 where
     K: Key + Clone,
     V: Value,
 {
     #[inline(always)]
     fn store(&mut self, mut transaction: &mut dyn Transaction, _object: &mut dyn object::Writer) {
-        self.field.current.for_each(|k, v| {
+        self.current.for_each(|k, v| {
             transaction.write_next((k, v));
         });
 
-        self.field.commit();
+        self.commit();
     }
 }
 

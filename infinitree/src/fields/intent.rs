@@ -1,6 +1,6 @@
 //! Intent to execute some operation on an [`Index`](crate::Index) field
 
-use super::query::QueryAction;
+use super::{query::QueryAction, LocalField};
 use crate::{
     index::{Transaction, TransactionList},
     object::{self, AEADReader, Pool},
@@ -67,6 +67,12 @@ pub trait Store {
     /// Typically, the [`ChunkPointer`][crate::ChunkPointer] values returned by `object`
     /// should be stored in the index.
     fn store(&mut self, transaction: &mut dyn Transaction, object: &mut dyn object::Writer);
+}
+
+impl<T: Store> Store for LocalField<T> {
+    fn store(&mut self, transaction: &mut dyn Transaction, object: &mut dyn object::Writer) {
+        self.field.store(transaction, object)
+    }
 }
 
 /// Load all data from the index field into memory.

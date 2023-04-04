@@ -148,3 +148,25 @@ where
         }
     }
 }
+
+impl<T: Collection> Collection for LocalField<T> {
+    type Depth = T::Depth;
+
+    type Key = T::Key;
+
+    type Serialized = T::Serialized;
+
+    type Item = T::Item;
+
+    fn key(from: &Self::Serialized) -> &Self::Key {
+        T::key(from)
+    }
+
+    fn load(from: Self::Serialized, object: &mut dyn object::Reader) -> Self::Item {
+        T::load(from, object)
+    }
+
+    fn insert(&mut self, record: Self::Item) {
+        self.field.insert(record)
+    }
+}
