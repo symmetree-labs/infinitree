@@ -20,7 +20,7 @@ syn = "1.0.109"
 
 [dev-dependencies]
 infinitree = { path = "../infinitree", version = "0.9.0" }
-serde = "1.0.159"
+serde = "1.0.160"
 
 [lib]
 proc-macro = true
