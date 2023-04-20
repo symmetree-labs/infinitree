@@ -456,3 +456,45 @@ where
         self.root.objects().len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Infinitree;
+    use crate::{backends::test::InMemoryBackend, crypto::UsernamePassword, fields::VersionedMap};
+
+    #[test]
+    fn versioned_commits() {
+        let key = || {
+            UsernamePassword::with_credentials("username".to_string(), "password".to_string())
+                .unwrap()
+        };
+
+        let backend = InMemoryBackend::shared();
+
+        {
+            let mut tree =
+                Infinitree::<VersionedMap<String, String>>::empty(backend.clone(), key()).unwrap();
+
+            tree.load_all().unwrap();
+            tree.index().insert("a".to_string(), "1".to_string());
+            tree.commit(None).unwrap().unwrap();
+        }
+        {
+            let mut tree =
+                Infinitree::<VersionedMap<String, String>>::open(backend.clone(), key()).unwrap();
+
+            tree.load_all().unwrap();
+            assert_eq!(tree.index().get("a"), Some("1".to_string().into()));
+            tree.index()
+                .update_with("a".to_string(), |_| "2".to_string());
+            tree.commit(None).unwrap().unwrap();
+        }
+        {
+            let tree =
+                Infinitree::<VersionedMap<String, String>>::open(backend.clone(), key()).unwrap();
+
+            tree.load_all().unwrap();
+            assert_eq!(tree.index().get("a"), Some("2".to_string().into()));
+        }
+    }
+}
