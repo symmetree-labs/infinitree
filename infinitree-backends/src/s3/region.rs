@@ -215,7 +215,13 @@ impl Region {
             DoAms3 => String::from("https://ams3.digitaloceanspaces.com"),
             DoSgp1 => String::from("https://sgp1.digitaloceanspaces.com"),
             DoFra1 => String::from("https://fra1.digitaloceanspaces.com"),
-            Custom { ref endpoint, .. } => endpoint.to_string(),
+            Custom { ref endpoint, .. } => {
+                if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
+                    endpoint.to_string()
+                } else {
+                    format!("https://{endpoint}")
+                }
+            }
         }
     }
 
