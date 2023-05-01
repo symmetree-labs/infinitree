@@ -4,7 +4,7 @@
 use crate::{
     crypto::ICryptoOps,
     fields::{
-        self, depth::Depth, Collection, Intent, Load, Query, QueryAction, KeyCachingIterator,
+        self, depth::Depth, Collection, Intent, KeyCachingIterator, Load, Query, QueryAction,
     },
     index::{self, Index, IndexExt, TransactionList},
     object::{AEADReader, AEADWriter, BlockBuffer, BufferedSink, Pool, PoolRef},
@@ -385,9 +385,16 @@ where
         K: Eq + std::hash::Hash + Clone + Send + Sync + 'a,
     {
         let commits_for_field = self.field_for_version(&field.name);
-	let transactions = <Q as Collection>::Depth::resolve(self.reader_pool.clone(), commits_for_field);
+        let transactions =
+            <Q as Collection>::Depth::resolve(self.reader_pool.clone(), commits_for_field);
 
-	KeyCachingIterator::new(transactions, self.chunk_reader()?, pred, field.strategy.as_mut()).context("no commits")
+        KeyCachingIterator::new(
+            transactions,
+            self.chunk_reader()?,
+            pred,
+            field.strategy.as_mut(),
+        )
+        .context("no commits")
     }
 
     fn filter_generations(&self) -> TransactionList {
@@ -451,23 +458,31 @@ where
 impl<I, CustomData> Infinitree<I, CustomData>
 where
     CustomData: Serialize + DeserializeOwned + Send + Sync,
-    I: Index + Clone + crate::fields::Store
+    I: Index + Clone + crate::fields::Store,
 {
     /// If the `Index` of the tree is a primitive field, retrieve a handle.
     ///
     /// This is mostly useful when used in conjunction with [`Tree::iter`].
     pub fn root_intent(&self) -> Intent<Box<crate::fields::strategy::LocalField<I>>> {
-	use crate::fields::strategy::Strategy;
+        use crate::fields::strategy::Strategy;
 
-	Intent::new("root", Box::new(crate::fields::strategy::LocalField::for_field(&self.index.read().deref().clone())))
+        Intent::new(
+            "root",
+            Box::new(crate::fields::strategy::LocalField::for_field(
+                &self.index.read().deref().clone(),
+            )),
+        )
     }
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::Infinitree;
-    use crate::{backends::test::InMemoryBackend, crypto::UsernamePassword, fields::{VersionedMap, LocalField, Intent, QueryAction, strategy::Strategy}};
+    use crate::{
+        backends::test::InMemoryBackend,
+        crypto::UsernamePassword,
+        fields::{QueryAction, VersionedMap},
+    };
 
     #[test]
     fn versioned_commits() {
@@ -498,7 +513,7 @@ mod tests {
         }
         {
             let tree =
-                Infinitree::<VersionedMap<String, String>>::open(backend.clone(), key()).unwrap();
+                Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
 
             tree.load_all().unwrap();
             assert_eq!(tree.index().get("a"), Some("2".to_string().into()));
@@ -534,10 +549,15 @@ mod tests {
         }
         {
             let tree =
-                Infinitree::<VersionedMap<String, String>>::open(backend.clone(), key()).unwrap();
+                Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
 
-	    let mut iter = tree.iter(tree.root_intent(), |_| QueryAction::Take).unwrap();
-            assert_eq!(iter.next(), Some(("a".to_string(), Some("2".to_string().into()))));
+            let mut iter = tree
+                .iter(tree.root_intent(), |_| QueryAction::Take)
+                .unwrap();
+            assert_eq!(
+                iter.next(),
+                Some(("a".to_string(), Some("2".to_string().into())))
+            );
             assert_eq!(iter.next(), None);
         }
     }

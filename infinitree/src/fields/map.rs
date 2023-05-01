@@ -268,8 +268,8 @@ mod test {
         assert_eq!(m.get(&1), Some(first.into()));
 
         // contains
-        assert_eq!(m.contains(&1), true);
-        assert_eq!(m.contains(&2), true);
+        assert!(m.contains(&1));
+        assert!(m.contains(&2));
 
         // update
         assert_eq!(

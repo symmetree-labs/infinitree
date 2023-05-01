@@ -688,8 +688,8 @@ mod test {
         assert_eq!(m.get(&1), Some(first.into()));
 
         // contains
-        assert_eq!(m.contains(&1), true);
-        assert_eq!(m.contains(&2), true);
+        assert!(m.contains(&1));
+        assert!(m.contains(&2));
 
         // update
         assert_eq!(
@@ -711,33 +711,33 @@ mod test {
         let value = "first".to_owned();
         let m = VersionedMap::<usize, String>::default();
 
-        assert_eq!(m.is_empty(), true);
+        assert!(m.is_empty());
 
         let _ = m.insert(1, value.clone());
 
         assert_eq!(m.len(), 1);
         assert_eq!(m.size(), 1);
-        assert_eq!(m.is_empty(), false);
+        assert!(!m.is_empty());
 
         m.commit();
 
         assert_eq!(m.get(&1), Some(value.into()));
-        assert_eq!(m.contains(&1), true);
+        assert!(m.contains(&1));
 
         m.remove(1);
 
         assert_eq!(m.get(&1), None);
-        assert_eq!(m.contains(&1), false);
+        assert!(!m.contains(&1));
 
         assert_eq!(m.len(), 0);
         assert_eq!(m.size(), 2);
-        assert_eq!(m.is_empty(), true);
+        assert!(m.is_empty());
 
         m.clear();
 
         assert_eq!(m.len(), 0);
         assert_eq!(m.size(), 0);
-        assert_eq!(m.is_empty(), true);
+        assert!(m.is_empty());
     }
 
     type TestMap = VersionedMap<usize, String>;

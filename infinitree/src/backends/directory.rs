@@ -215,9 +215,9 @@ mod test {
 
         // if not mmap'd, there should be no lock held on the file
         // posix allows deleting open files
-        assert_eq!(test_filename.exists(), false);
+        assert!(!test_filename.exists());
         drop(_obj_1_read_ref);
-        assert_eq!(test_filename.exists(), false);
+        assert!(!test_filename.exists());
     }
 
     fn write_object_get_ref_then_delete(

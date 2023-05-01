@@ -1,6 +1,6 @@
 use super::{Collection, FieldReader};
 use crate::object::{self, DeserializeStream};
-use std::{marker::PhantomData, sync::Arc, hash::Hash};
+use std::{hash::Hash, marker::PhantomData, sync::Arc};
 
 /// Result of a query predicate
 pub enum QueryAction {
@@ -12,7 +12,8 @@ pub enum QueryAction {
     Abort,
 }
 
-pub(crate) struct KeyCachingIterator<T, K, Transactions, Predicate, Reader> where
+pub(crate) struct KeyCachingIterator<T, K, Transactions, Predicate, Reader>
+where
     K: Eq + Hash,
 {
     current: DeserializeStream,
@@ -23,7 +24,8 @@ pub(crate) struct KeyCachingIterator<T, K, Transactions, Predicate, Reader> wher
     _fieldtype: PhantomData<T>,
 }
 
-impl<T, K, Transactions, Predicate, Reader> KeyCachingIterator<T, K, Transactions, Predicate, Reader>
+impl<T, K, Transactions, Predicate, Reader>
+    KeyCachingIterator<T, K, Transactions, Predicate, Reader>
 where
     T: Collection<Key = K>,
     K: Eq + Hash,
@@ -31,22 +33,28 @@ where
     Predicate: Fn(&K) -> QueryAction,
     Reader: object::Reader,
 {
-    pub fn new(mut transactions: Transactions, reader: Reader, predicate: Predicate, _field: &mut T) -> Option<Self> {
-	let current = transactions.next()?;
-	
-	Some(Self {
-	    current,
-	    transactions,
-	    reader,
-	    predicate: Arc::new(predicate),
-	    cache: Default::default(),
-	    _fieldtype: Default::default()
-	})
+    pub fn new(
+        mut transactions: Transactions,
+        reader: Reader,
+        predicate: Predicate,
+        _field: &mut T,
+    ) -> Option<Self> {
+        let current = transactions.next()?;
+
+        Some(Self {
+            current,
+            transactions,
+            reader,
+            predicate: Arc::new(predicate),
+            cache: Default::default(),
+            _fieldtype: Default::default(),
+        })
     }
 }
 
-impl<T, O, K, Transactions, Predicate, Reader> Iterator for KeyCachingIterator<T, K, Transactions, Predicate, Reader>
-where 
+impl<T, O, K, Transactions, Predicate, Reader> Iterator
+    for KeyCachingIterator<T, K, Transactions, Predicate, Reader>
+where
     T: Collection<Key = K, Item = O>,
     K: Eq + Hash + Clone,
     Transactions: Iterator<Item = DeserializeStream>,
@@ -56,38 +64,36 @@ where
     type Item = O;
 
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
-	loop {
-	match self.current.read_next() {
-	    Ok(item) => {
-		use QueryAction::*;
+        loop {
+            match self.current.read_next() {
+                Ok(item) => {
+                    use QueryAction::*;
 
-		let key = T::key(&item);
-		match (self.predicate)(key) {
-                    Take => {
-			if self.cache.contains(key) {
-			    continue;
-			} else {
-				_ = self.cache.insert(key.clone());
-				return Some(T::load(item, &mut self.reader))
-			    }
-		    },
-                    Skip => continue,
-                    Abort => return None,
-		}
-	    }
-	    Err(_) => {
-		match self.transactions.next() {
-		    Some(next) => {
-			self.current = next;
-			continue;
-		    },
-		    None => {
-			return None;
-		    }
-		}
-	    }
-	}
-	}
+                    let key = T::key(&item);
+                    match (self.predicate)(key) {
+                        Take => {
+                            if self.cache.contains(key) {
+                                continue;
+                            } else {
+                                _ = self.cache.insert(key.clone());
+                                return Some(T::load(item, &mut self.reader));
+                            }
+                        }
+                        Skip => continue,
+                        Abort => return None,
+                    }
+                }
+                Err(_) => match self.transactions.next() {
+                    Some(next) => {
+                        self.current = next;
+                        continue;
+                    }
+                    None => {
+                        return None;
+                    }
+                },
+            }
+        }
     }
 }
 
