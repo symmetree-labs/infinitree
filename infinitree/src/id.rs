@@ -1,6 +1,6 @@
 use crate::crypto::{Digest, SecureRandom};
 pub use hex::FromHexError;
-use std::{convert::TryFrom, string::ToString};
+use std::{convert::TryFrom, str::FromStr, string::ToString};
 
 /// Unique identifier for a persistence object.
 #[derive(Default, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +39,14 @@ impl TryFrom<&str> for Id {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         hex::decode(value).map(Self::from_bytes)
+    }
+}
+
+impl FromStr for Id {
+    type Err = FromHexError;
+
+    fn from_str(value: &str) -> Result<Self, <Self as FromStr>::Err> {
+        Self::try_from(value)
     }
 }
 
