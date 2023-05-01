@@ -253,7 +253,8 @@ mod test {
     use hyper::service::make_service_fn;
     use hyper::Server;
     use infinitree::{backends::Backend, object::WriteObject, ObjectId};
-    use s3_server::{storages::fs::FileSystem, S3Service, SimpleAuth};
+    use s3s::{service::S3Service, auth::SimpleAuth};
+    use s3s_fs::FileSystem;
     use std::{
         future,
         net::{SocketAddr, TcpListener},
@@ -268,13 +269,13 @@ mod test {
 
     fn setup_s3_server(addr: &SocketAddr) {
         let fs = FileSystem::new(TEST_DATA_DIR).unwrap();
-        let mut service = S3Service::new(fs);
+        let mut service = S3Service::new(Box::new(fs));
         let mut auth = SimpleAuth::new();
 
         std::env::set_var("AWS_ACCESS_KEY_ID", AWS_ACCESS_KEY_ID);
         std::env::set_var("AWS_SECRET_ACCESS_KEY", AWS_SECRET_ACCESS_KEY_ID);
         auth.register(AWS_ACCESS_KEY_ID.into(), AWS_SECRET_ACCESS_KEY_ID.into());
-        service.set_auth(auth);
+        service.set_auth(Box::new(auth));
 
         let server = {
             let service = service.into_shared();
@@ -306,7 +307,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     #[should_panic(
-        expected = r#"Generic { source: Bad response: 404, <?xml version="1.0" encoding="UTF-8"?><Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error> }"#
+        expected = r#"Generic { source: Bad response: 404, <?xml version="1.0" encoding="UTF-8"?><Error><Code>NoSuchKey</Code></Error> }"#
     )]
     async fn s3_reading_nonexistent_object() {
         let addr = SocketAddr::from(SERVER_ADDR_RO);
