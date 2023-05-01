@@ -13,7 +13,7 @@ use crate::{
 use anyhow::{Context, Result};
 use parking_lot::RwLock;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{ops::Deref, sync::Arc, time::SystemTime};
+use std::{collections::HashMap, ops::Deref, sync::Arc, time::SystemTime};
 
 mod commit;
 pub use commit::*;
@@ -398,32 +398,53 @@ where
     }
 
     fn filter_generations(&self) -> TransactionList {
+        let Some(allowed) = self.apply_commit_filter() else {
+            return Default::default();
+        };
+
         self.root
             .transaction_log
             .read()
             .iter()
-            .skip_while(|(gen, _, _)| match &self.commit_filter {
-                CommitFilter::All => false,
-                CommitFilter::Single(target) => gen != target,
-                CommitFilter::UpTo(_target) => false,
-                CommitFilter::Range(start, _end) => gen != start,
-            })
-            .take_while(|(gen, _, _)| match &self.commit_filter {
-                CommitFilter::All => true,
-                CommitFilter::Single(target) => gen == target,
-                CommitFilter::UpTo(target) => self
-                    .root
-                    .version_after(target)
-                    .map(|ref v| v != gen)
-                    .unwrap_or(true),
-                CommitFilter::Range(_start, end) => self
-                    .root
-                    .version_after(end)
-                    .map(|ref v| v != gen)
-                    .unwrap_or(true),
-            })
+            .filter(|(cid, _, _)| allowed.contains(cid))
             .cloned()
             .collect()
+    }
+
+    fn apply_commit_filter(&self) -> Option<Vec<CommitId>> {
+        let clist = self.commit_list();
+        let commits = clist
+            .iter()
+            .cloned()
+            .map(|c| (c.id, c))
+            .collect::<HashMap<_, _>>();
+
+        let mut list = vec![];
+        let mut next = match &self.commit_filter {
+            // If we're just looking for a single commit, job's done
+            CommitFilter::Single(id) => return Some(vec![commits.get(id)?.id]),
+
+            CommitFilter::All => clist.last(),
+            CommitFilter::UpTo(id) => commits.get(id),
+            CommitFilter::Range(_start, end) => commits.get(end),
+        };
+
+        while let Some(current) = next {
+            list.push(current.id);
+
+            next = match &self.commit_filter {
+                CommitFilter::Range(start, _end) if &current.id == start => return Some(list),
+                CommitFilter::Single(_) => unreachable!(),
+
+                _ => current
+                    .metadata
+                    .previous
+                    .as_ref()
+                    .and_then(|id| commits.get(id)),
+            };
+        }
+
+        Some(list)
     }
 
     fn field_for_version(&self, field: &index::Field) -> TransactionList {
@@ -483,16 +504,13 @@ mod tests {
         crypto::UsernamePassword,
         fields::{QueryAction, VersionedMap},
     };
+    use std::sync::Arc;
 
-    #[test]
-    fn versioned_commits() {
-        let key = || {
-            UsernamePassword::with_credentials("username".to_string(), "password".to_string())
-                .unwrap()
-        };
-
+    fn key() -> UsernamePassword {
+        UsernamePassword::with_credentials("username".to_string(), "password".to_string()).unwrap()
+    }
+    fn test_tree_with_multiple_commits() -> Arc<InMemoryBackend> {
         let backend = InMemoryBackend::shared();
-
         {
             let mut tree =
                 Infinitree::<VersionedMap<String, String>>::empty(backend.clone(), key()).unwrap();
@@ -511,6 +529,14 @@ mod tests {
                 .update_with("a".to_string(), |_| "2".to_string());
             tree.commit(None).unwrap().unwrap();
         }
+
+        backend
+    }
+
+    #[test]
+    fn versioned_commits() {
+        let backend = test_tree_with_multiple_commits();
+
         {
             let tree = Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
 
@@ -521,31 +547,8 @@ mod tests {
 
     #[test]
     fn versioned_commits_iter() {
-        let key = || {
-            UsernamePassword::with_credentials("username".to_string(), "password".to_string())
-                .unwrap()
-        };
+        let backend = test_tree_with_multiple_commits();
 
-        let backend = InMemoryBackend::shared();
-
-        {
-            let mut tree =
-                Infinitree::<VersionedMap<String, String>>::empty(backend.clone(), key()).unwrap();
-
-            tree.load_all().unwrap();
-            tree.index().insert("a".to_string(), "1".to_string());
-            tree.commit(None).unwrap().unwrap();
-        }
-        {
-            let mut tree =
-                Infinitree::<VersionedMap<String, String>>::open(backend.clone(), key()).unwrap();
-
-            tree.load_all().unwrap();
-            assert_eq!(tree.index().get("a"), Some("1".to_string().into()));
-            tree.index()
-                .update_with("a".to_string(), |_| "2".to_string());
-            tree.commit(None).unwrap().unwrap();
-        }
         {
             let tree = Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
 
@@ -557,6 +560,66 @@ mod tests {
                 Some(("a".to_string(), Some("2".to_string().into())))
             );
             assert_eq!(iter.next(), None);
+        }
+    }
+
+    #[test]
+    fn commit_filter_resolution_upto() {
+        let backend = test_tree_with_multiple_commits();
+
+        {
+            let mut tree =
+                Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
+            let commit = tree.commit_list().first().unwrap().id;
+            tree.filter_commits(super::CommitFilter::UpTo(commit));
+
+            tree.load_all().unwrap();
+            assert_eq!(tree.index().get("a"), Some("1".to_string().into()));
+        }
+    }
+
+    #[test]
+    fn commit_filter_resolution_range() {
+        let backend = test_tree_with_multiple_commits();
+
+        {
+            let mut tree =
+                Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
+
+            let start = tree.commit_list().first().unwrap().id;
+            let end = tree.commit_list().last().unwrap().id;
+
+            tree.filter_commits(super::CommitFilter::Range(start, end));
+
+            tree.load_all().unwrap();
+            assert_eq!(tree.index().get("a"), Some("2".to_string().into()));
+        }
+    }
+
+    #[test]
+    fn commit_filter_resolution_single() {
+        let backend = test_tree_with_multiple_commits();
+
+        {
+            let mut tree =
+                Infinitree::<VersionedMap<String, String>>::open(backend.clone(), key()).unwrap();
+
+            tree.load_all().unwrap();
+            assert_eq!(tree.index().get("a"), Some("2".to_string().into()));
+            tree.index()
+                .update_with("a".to_string(), |_| "3".to_string());
+            tree.commit(None).unwrap().unwrap();
+        }
+
+        {
+            let mut tree =
+                Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
+
+            let commit = tree.commit_list().get(1).unwrap().id;
+            tree.filter_commits(super::CommitFilter::Single(commit));
+
+            tree.load_all().unwrap();
+            assert_eq!(tree.index().get("a"), Some("2".to_string().into()));
         }
     }
 }

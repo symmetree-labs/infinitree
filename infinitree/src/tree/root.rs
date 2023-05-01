@@ -61,20 +61,6 @@ impl<CustomData> RootIndex<CustomData>
 where
     CustomData: Serialize + DeserializeOwned + Send + Sync,
 {
-    pub(crate) fn version_after(&self, gen: &CommitId) -> Option<CommitId> {
-        let handle = self.commit_list.read();
-
-        // walking in reverse may hit faster
-        let mut iter = handle.iter().rev().map(|c| c.id).peekable();
-        while let Some(i) = iter.next() {
-            if Some(gen) == iter.peek() {
-                return Some(i);
-            }
-        }
-
-        None
-    }
-
     pub(crate) fn objects(&self) -> Vec<ObjectId> {
         let root = self.objects.read();
         let transactions = self.transaction_log.read();
