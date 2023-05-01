@@ -4,7 +4,7 @@
 use crate::{
     crypto::ICryptoOps,
     fields::{
-        self, depth::Depth, Collection, Intent, KeyCachingIterator, Load, Query, QueryAction,
+        depth::Depth, Collection, Intent, KeyCachingIterator, Load, Query, QueryAction,
     },
     index::{self, Index, IndexExt, TransactionList},
     object::{AEADReader, AEADWriter, BlockBuffer, BufferedSink, Pool, PoolRef},
@@ -380,7 +380,7 @@ where
         pred: impl Fn(&K) -> QueryAction + Send + Sync + 'static,
     ) -> Result<impl Iterator<Item = O> + Send + Sync + '_>
     where
-        for<'de> <Q as fields::Collection>::Serialized: serde::Deserialize<'de>,
+        for<'de> Q::Serialized: serde::Deserialize<'de>,
         Q: Collection<Key = K, Item = O> + Send + Sync + 'static,
         K: Eq + std::hash::Hash + Clone + Send + Sync + 'a,
     {
