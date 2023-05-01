@@ -4,13 +4,13 @@
 use crate::{
     crypto::ICryptoOps,
     fields::{
-        self, depth::Depth, Collection, Intent, Load, Query, QueryAction, QueryIteratorOwned,
+        self, depth::Depth, Collection, Intent, Load, Query, QueryAction, KeyCachingIterator,
     },
     index::{self, Index, IndexExt, TransactionList},
     object::{AEADReader, AEADWriter, BlockBuffer, BufferedSink, Pool, PoolRef},
     Backend, Key,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use parking_lot::RwLock;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{ops::Deref, sync::Arc, time::SystemTime};
@@ -374,29 +374,20 @@ where
     }
 
     /// Same as [`query`][Self::query], but returns an `Iterator`
-    pub fn iter<K, O, Q>(
-        &self,
+    pub fn iter<'a, K, O, Q>(
+        &'a self,
         mut field: Intent<Box<Q>>,
         pred: impl Fn(&K) -> QueryAction + Send + Sync + 'static,
     ) -> Result<impl Iterator<Item = O> + Send + Sync + '_>
     where
         for<'de> <Q as fields::Collection>::Serialized: serde::Deserialize<'de>,
         Q: Collection<Key = K, Item = O> + Send + Sync + 'static,
+        K: Eq + std::hash::Hash + Clone + Send + Sync + 'a,
     {
-        let pred = Arc::new(pred);
         let commits_for_field = self.field_for_version(&field.name);
+	let transactions = <Q as Collection>::Depth::resolve(self.reader_pool.clone(), commits_for_field);
 
-        Ok(
-            <Q as Collection>::Depth::resolve(self.reader_pool.clone(), commits_for_field)
-                .flat_map(move |transaction| {
-                    QueryIteratorOwned::new(
-                        transaction,
-                        self.chunk_reader().unwrap(),
-                        pred.clone(),
-                        field.strategy.as_mut(),
-                    )
-                }),
-        )
+	KeyCachingIterator::new(transactions, self.chunk_reader()?, pred, field.strategy.as_mut()).context("no commits")
     }
 
     fn filter_generations(&self) -> TransactionList {

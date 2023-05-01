@@ -28,7 +28,6 @@ impl<T: Send + Sync + Clone> Strategy<T> for SparseField<T> {
 pub struct LocalField<Field> {
     pub field: Field,
 }
-
 impl<T: Send + Sync + Clone> Strategy<T> for LocalField<T> {
     #[inline(always)]
     fn for_field(field: &T) -> Self {
