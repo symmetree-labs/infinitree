@@ -253,7 +253,7 @@ mod test {
     use hyper::service::make_service_fn;
     use hyper::Server;
     use infinitree::{backends::Backend, object::WriteObject, ObjectId};
-    use s3s::{service::S3Service, auth::SimpleAuth};
+    use s3s::{auth::SimpleAuth, service::S3Service};
     use s3s_fs::FileSystem;
     use std::{
         future,

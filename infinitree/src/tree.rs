@@ -512,8 +512,7 @@ mod tests {
             tree.commit(None).unwrap().unwrap();
         }
         {
-            let tree =
-                Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
+            let tree = Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
 
             tree.load_all().unwrap();
             assert_eq!(tree.index().get("a"), Some("2".to_string().into()));
@@ -548,8 +547,7 @@ mod tests {
             tree.commit(None).unwrap().unwrap();
         }
         {
-            let tree =
-                Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
+            let tree = Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
 
             let mut iter = tree
                 .iter(tree.root_intent(), |_| QueryAction::Take)
