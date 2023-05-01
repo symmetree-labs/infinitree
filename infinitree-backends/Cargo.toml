@@ -25,7 +25,7 @@ anyhow = "1.0.71"
 scc = "1.6.3"
 lru = "0.10.0"
 
-rusty-s3 = "0.4.1"
+rusty-s3 = { version = "0.4.1", default-features = false }
 reqwest = { version = "0.11.17", default-features = false }
 tokio = { version = "1.28.0", default-features = false, features = ["rt", "sync"] }
 futures = "0.3.28"
