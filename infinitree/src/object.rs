@@ -49,8 +49,8 @@ pub enum ObjectError {
     },
     #[error("Chunk too large to be written: {size}, max: {max_size}")]
     ChunkTooLarge { max_size: usize, size: usize },
-    #[error("Buffer is smaller than required size: {min_size}")]
-    BufferTooSmall { min_size: usize },
+    #[error("Buffer ({buf_size}) is smaller than required size: {min_size}")]
+    BufferTooSmall { min_size: usize, buf_size: usize },
     #[error("Serialize failed")]
     Serialize {
         source: Box<dyn std::error::Error + Send + Sync>,

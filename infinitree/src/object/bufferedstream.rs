@@ -158,6 +158,7 @@ pub struct BufferedSink<Writer = super::AEADWriter, Buffer = BlockBuffer> {
     chunks: Vec<ChunkPointer>,
     pos: usize,
     len: usize,
+    chunk_size: usize,
 }
 
 impl<W> BufferedSink<W>
@@ -167,12 +168,22 @@ where
     /// Create a new [`BufferedSink`] with the underlying
     /// [`Writer`][crate::object::Writer] instance.
     pub fn new(writer: W) -> BufferedSink<W> {
+        Self::with_chunk_size(writer, CHUNK_SIZE)
+    }
+
+    /// Create a new [`BufferedSink`] with a custom chunk size
+    ///
+    /// The default chunk size is `500 * 1024` bytes, which
+    /// experientially is a good trade-off for various stream sizes,
+    /// as it will minimize storage overhead.
+    pub fn with_chunk_size(writer: W, chunk_size: usize) -> Self {
         Self {
             writer,
             buffer: BlockBuffer::default(),
             chunks: vec![],
             pos: 0,
             len: 0,
+            chunk_size,
         }
     }
 }
@@ -188,6 +199,7 @@ where
         if buffer.as_mut().len() < CHUNK_SIZE {
             return Err(super::ObjectError::BufferTooSmall {
                 min_size: CHUNK_SIZE,
+                buf_size: buffer.as_mut().len(),
             });
         }
 
@@ -197,7 +209,30 @@ where
             chunks: vec![],
             pos: 0,
             len: 0,
+            chunk_size: CHUNK_SIZE,
         })
+    }
+
+    /// Set the maximum size for chunks.
+    ///
+    /// # Errors
+    ///
+    /// Will return an error if the underlying buffer is too small.
+    pub fn set_chunk_size(mut self, size: usize) -> super::Result<Self> {
+        if self.buffer.as_mut().len() < size {
+            return Err(super::ObjectError::BufferTooSmall {
+                min_size: CHUNK_SIZE,
+                buf_size: self.buffer.as_mut().len(),
+            });
+        }
+
+        self.chunk_size = size;
+        Ok(self)
+    }
+
+    /// Return the current effective maximum chunk size.
+    pub fn chunk_size(&self) -> usize {
+        self.chunk_size
     }
 
     /// Clear the internal buffer without flushing the underlying [`Writer`].
