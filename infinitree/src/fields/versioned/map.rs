@@ -142,7 +142,7 @@ where
     /// assert_eq!(m.update_with(1, |_| "second".to_owned()), Some("second".to_owned().into()));
     /// ```
     #[inline(always)]
-    pub fn update_with(&self, key: K, update: impl FnOnce(Arc<V>) -> V) -> Action<V> {
+    pub fn update_with<T: Into<Arc<V>>>(&self, key: K, update: impl FnOnce(Arc<V>) -> T) -> Action<V> {
         match self.get(&key) {
             Some(existing) => {
                 let result = Cell::new(None);
