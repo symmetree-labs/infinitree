@@ -253,7 +253,7 @@ mod test {
     use hyper::service::make_service_fn;
     use hyper::Server;
     use infinitree::{backends::Backend, object::WriteObject, ObjectId};
-    use s3s::{auth::SimpleAuth, service::S3Service};
+    use s3s::{auth::SimpleAuth, service::S3ServiceBuilder};
     use s3s_fs::FileSystem;
     use std::{
         future,
@@ -269,13 +269,16 @@ mod test {
 
     fn setup_s3_server(addr: &SocketAddr) {
         let fs = FileSystem::new(TEST_DATA_DIR).unwrap();
-        let mut service = S3Service::new(Box::new(fs));
         let mut auth = SimpleAuth::new();
-
         std::env::set_var("AWS_ACCESS_KEY_ID", AWS_ACCESS_KEY_ID);
         std::env::set_var("AWS_SECRET_ACCESS_KEY", AWS_SECRET_ACCESS_KEY_ID);
         auth.register(AWS_ACCESS_KEY_ID.into(), AWS_SECRET_ACCESS_KEY_ID.into());
-        service.set_auth(Box::new(auth));
+
+        let service = {
+            let mut b = S3ServiceBuilder::new(fs);
+            b.set_auth(auth);
+            b.build()
+        };
 
         let server = {
             let service = service.into_shared();
