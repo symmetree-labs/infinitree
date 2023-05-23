@@ -3,9 +3,7 @@
 
 use crate::{
     crypto::ICryptoOps,
-    fields::{
-        depth::Depth, Collection, Intent, KeyCachingIterator, Load, Query, QueryAction,
-    },
+    fields::{depth::Depth, Collection, Intent, KeyCachingIterator, Load, Query, QueryAction},
     index::{self, Index, IndexExt, TransactionList},
     object::{AEADReader, AEADWriter, BlockBuffer, BufferedSink, Pool, PoolRef},
     Backend, Key,
