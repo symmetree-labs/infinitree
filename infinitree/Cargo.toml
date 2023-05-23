@@ -2,7 +2,7 @@
 name = "infinitree"
 authors = ["Peter Parkanyi <p@symmetree.dev>"]
 description = "Embedded, encrypted database with tiered cache"
-version = "0.10.1"
+version = "0.10.2"
 keywords = ["crypto", "database", "cache", "sqlite", "rocksdb"]
 categories = ["database-implementations", "concurrency", "data-structures", "algorithms", "caching"]
 homepage = "https://symmetree.dev"
