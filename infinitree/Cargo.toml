@@ -22,7 +22,7 @@ test = []
 _test = ["test"]
 
 [dependencies]
-blake3 = "1.4.0"
+blake3 = "1.4.1"
 ring = "0.16.20"
 rust-argon2 = "1.0.0"
 libsodium-sys-stable = { version = "1.19.28", features = ["minimal", "optimized"], optional = true }
@@ -30,16 +30,16 @@ yubico_manager = { version = "0.9.0", optional = true }
 
 lz4_flex = { version = "0.11.1", default-features = false, features = ["safe-decode", "frame"] }
 
-scc = "1.8.2"
+scc = "1.8.3"
 flume = "0.10.14"
-lru = "0.10.0"
-thiserror = "1.0.40"
+lru = "0.10.1"
+thiserror = "1.0.43"
 anyhow = "1.0.71"
 hex = "0.4.3"
 parking_lot = "0.12.1"
 
-serde = { version = "1.0.164", features = ["rc"] }
-serde_derive = "1.0.164"
+serde = { version = "1.0.167", features = ["rc"] }
+serde_derive = "1.0.167"
 serde_with = "3.0.0"
 rmp-serde = "1.1.1"
 
@@ -51,7 +51,7 @@ memmap2 = { version = "0.7.1", optional = true }
 
 [dev-dependencies]
 criterion = "0.5.1"
-paste = "1.0.12"
+paste = "1.0.13"
 
 [[bench]]
 name = "bench"

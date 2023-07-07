@@ -18,21 +18,21 @@ native-tls = ["reqwest/native-tls-alpn"]
 [dependencies]
 infinitree = { version = "0.10.0", path = "../infinitree" }
 
-serde = "1.0.164"
-serde_derive = "1.0.164"
+serde = "1.0.167"
+serde_derive = "1.0.167"
 
 anyhow = "1.0.71"
-scc = "1.8.2"
-lru = "0.10.0"
+scc = "1.8.3"
+lru = "0.10.1"
 
 rusty-s3 = { version = "0.4.1", default-features = false }
 reqwest = { version = "0.11.18", default-features = false }
-tokio = { version = "1.28.2", default-features = false, features = ["rt", "sync"] }
+tokio = { version = "1.29.1", default-features = false, features = ["rt", "sync"] }
 futures = "0.3.28"
 
 [dev-dependencies]
 infinitree = { version = "0.10.0", path = "../infinitree", features = ["test"] }
-tokio = { version = "1.28.2", default-features = false, features = ["rt", "sync", "macros", "rt-multi-thread"] }
-hyper = { version = "0.14.26", features = ["server"] }
+tokio = { version = "1.29.1", default-features = false, features = ["rt", "sync", "macros", "rt-multi-thread"] }
+hyper = { version = "0.14.27", features = ["server"] }
 s3s = "0.6.1"
 s3s-fs = "0.6.1"
