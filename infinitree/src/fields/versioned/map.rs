@@ -9,7 +9,7 @@ use crate::{
     object::{self, serializer::SizedPointer, ObjectError},
 };
 use scc::HashMap;
-use std::{borrow::Borrow, cell::Cell, hash::Hash, sync::Arc};
+use std::{borrow::Borrow, hash::Hash, sync::Arc};
 
 /// HashMap that tracks incremental changes between commits
 ///
@@ -99,26 +99,13 @@ where
     pub fn insert_with<T: Into<Arc<V>>, F: FnOnce() -> T>(&self, key: K, new: F) -> Arc<V> {
         match self.get(&key) {
             Some(v) => v,
-            None => {
-                let new = Arc::new(Cell::new(Some(new)));
-                let result = Cell::new(None);
-
-                self.current.upsert(
-                    key,
-                    || {
-                        let val = store(new.take().unwrap()());
-                        result.set(val.clone());
-                        val
-                    },
-                    |_, v| {
-                        v.get_or_insert_with(|| new.take().unwrap()().into());
-                        result.set(v.clone());
-                    },
-                );
-
-                // this will never panic, because callbacks guarantee it ends up being Some()
-                result.into_inner().unwrap()
-            }
+            None => self
+                .current
+                .entry(key)
+                .or_default()
+                .get_mut()
+                .get_or_insert_with(|| new().into())
+                .clone(),
         }
     }
 
@@ -149,24 +136,10 @@ where
     ) -> Action<V> {
         match self.get(&key) {
             Some(existing) => {
-                let result = Cell::new(None);
-                let update = Arc::new(Cell::new(Some(update)));
-
-                self.current.upsert(
-                    key,
-                    || {
-                        let val = store(update.take().unwrap()(existing.clone()));
-                        result.set(val.clone());
-                        val
-                    },
-                    |_, v| {
-                        *v = store(update.take().unwrap()(v.as_ref().unwrap().clone()));
-                        result.set(v.clone())
-                    },
-                );
-
-                // this will never panic, because callbacks guarantee it ends up being Some()
-                result.into_inner()
+                let mut entry = self.current.entry(key).or_default();
+                let current = entry.get_mut();
+                *current = Some(update(existing.clone()).into());
+                current.clone()
             }
             None => None,
         }
@@ -216,8 +189,7 @@ where
     #[inline(always)]
     pub fn remove(&self, key: K) {
         if self.contains(&key) {
-            self.current
-                .upsert(key, || Action::None, |_, v| *v = Action::None)
+            self.current.entry(key).or_default().insert(None);
         }
     }
 
@@ -262,22 +234,29 @@ where
     /// ```
     #[inline(always)]
     pub fn for_each(&self, mut callback: impl FnMut(&K, &V)) {
-        // note: this is copy-pasta, because the closures have
-        // different lifetimes.
-        //
-        // if you have a good idea how to avoid
-        // using a macro and just do this, please send a PR
+        let mut current = self.base.first_entry();
+        while let Some(entry) = current {
+            let Some(v) = entry.get() else {
+                current = entry.next();
+                continue;
+            };
 
-        self.base.for_each(|k, v: &mut Action<V>| {
-            if let Some(value) = v {
-                (callback)(k, Arc::as_ref(value));
+            // This is either a deletion or a new value.
+            // Either way, not interested in this round.
+            if !self.current.contains(entry.key()) {
+                (callback)(entry.key(), Arc::as_ref(v));
             }
-        });
-        self.current.for_each(|k, v: &mut Action<V>| {
-            if let Some(value) = v {
-                (callback)(k, Arc::as_ref(value));
+
+            current = entry.next();
+        }
+
+        current = self.current.first_entry();
+        while let Some(entry) = current {
+            if let Some(value) = entry.get() {
+                (callback)(entry.key(), Arc::as_ref(value));
             }
-        });
+            current = entry.next();
+        }
     }
 
     /// Mark values as deleted where `callback` returns `false`
@@ -296,27 +275,46 @@ where
     /// ```
     #[inline(always)]
     pub fn retain(&self, mut callback: impl FnMut(&K, &V) -> bool) {
-        // note: this is copy-pasta, because the closures have
-        // different lifetimes.
-        //
-        // if you have a good idea how to avoid
-        // using a macro and just do this, please send a PR
+        let mut current = self.base.first_entry();
+        while let Some(entry) = current {
+            let Some(v) = entry.get() else {
+                current = entry.next();
+                continue;
+            };
+            let key = entry.key();
 
-        self.current.for_each(|k, v: &mut Action<V>| {
-            if let Some(value) = v {
-                if !(callback)(k, Arc::as_ref(value)) {
-                    *v = Action::None
-                }
+            // If the value is in the base, we'll need to modify
+            // current anyway, so may as well decide here.
+            let retain = if let Some(new_v) = self.current.get(key).and_then(|e| e.get().clone()) {
+                (callback)(key, Arc::as_ref(&new_v))
+            } else {
+                (callback)(key, Arc::as_ref(v))
+            };
+
+            if !retain {
+                *self.current.entry(key.clone()).or_default().get_mut() = None;
             }
-        });
-        self.base.for_each(|k, v: &mut Action<V>| {
-            if let Some(value) = v {
-                if !(callback)(k, Arc::as_ref(value)) {
-                    self.current
-                        .upsert(k.clone(), || Action::None, |_, v| *v = Action::None)
-                }
+
+            current = entry.next();
+        }
+
+        current = self.current.first_entry();
+        while let Some(mut entry) = current {
+            // the base loop would have visited this, so we can skip (or if deletion)
+            if self.base.contains(entry.key()) || entry.get().is_none() {
+                current = entry.next();
+                continue;
             }
-        });
+
+            if !(callback)(
+                entry.key(),
+                Arc::as_ref(entry.get().as_ref().expect("checked above")),
+            ) {
+                *entry.get_mut() = None;
+            }
+
+            current = entry.next();
+        }
     }
 
     /// Clear out the current changeset, and commit all changes to history.
@@ -333,8 +331,7 @@ where
                 //
                 // cloning the value is safe and cheap, because
                 // it's always an Option<Arc<V>>
-                self.base
-                    .upsert(k.clone(), || v.clone(), |_, v| *v = v.clone());
+                *self.base.entry(k.clone()).or_default().get_mut() = v.clone();
             }
 
             false
@@ -348,14 +345,17 @@ where
     pub fn len(&self) -> usize {
         let mut stored = self.base.len();
 
-        self.current.for_each(|_, v| {
-            match v {
+        let mut current = self.current.first_entry();
+        while let Some(e) = current {
+            match e.get() {
                 Some(_) => stored += 1,
 
                 // None implies it's Some() in `self.base` due to `remove()` semantics
                 None => stored -= 1,
             }
-        });
+
+            current = e.next();
+        }
 
         stored
     }
@@ -412,16 +412,16 @@ where
     /// assert_eq!(m.size(), 2);
     /// assert_eq!(m.is_empty(), true);
     ///
-    /// // Call `clear()`
-    /// assert_eq!(m.clear(), 2);
+    /// m.clear();
     ///
     /// assert_eq!(m.len(), 0);
     /// assert_eq!(m.size(), 0);
     /// assert_eq!(m.is_empty(), true);
     /// ```
     #[inline(always)]
-    pub fn clear(&self) -> usize {
-        self.base.clear() + self.current.clear()
+    pub fn clear(&self) {
+        self.base.clear();
+        self.current.clear();
     }
 
     /// Roll back all modification since the last commit
@@ -459,15 +459,14 @@ where
     /// assert_eq!(m.size(), 2);
     /// assert_eq!(m.is_empty(), true);
     ///
-    /// // Call `rollback()`
-    /// assert_eq!(m.rollback(), 1);
+    /// m.rollback();
     ///
     /// assert_eq!(m.len(), 1);
     /// assert_eq!(m.size(), 1);
     /// assert_eq!(m.is_empty(), false);
     #[inline(always)]
-    pub fn rollback(&self) -> usize {
-        self.current.clear()
+    pub fn rollback(&self) {
+        self.current.clear();
     }
 
     /// True if the number of additions to the map is zero
@@ -518,9 +517,11 @@ where
 {
     #[inline(always)]
     fn store(&mut self, mut transaction: &mut dyn Transaction, _object: &mut dyn object::Writer) {
-        self.current.for_each(|k, v| {
-            transaction.write_next((k, v));
-        });
+        let mut current = self.current.first_entry();
+        while let Some(e) = current {
+            transaction.write_next((e.key(), e.get()));
+            current = e.next();
+        }
 
         self.commit();
     }
@@ -582,7 +583,11 @@ where
 {
     #[inline(always)]
     fn store(&mut self, mut transaction: &mut dyn Transaction, writer: &mut dyn object::Writer) {
-        self.field.current.for_each(|key, value| {
+        let mut current = self.field.current.first_entry();
+        while let Some(entry) = current {
+            let key = entry.key();
+            let value = entry.get();
+
             let ptr = value.as_ref().map(|stored| {
                 object::serializer::write(
                     writer,
@@ -596,7 +601,8 @@ where
                 .unwrap()
             });
             transaction.write_next((key, ptr));
-        });
+            current = entry.next();
+        }
 
         self.field.commit();
     }

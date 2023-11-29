@@ -1,6 +1,6 @@
 use super::{Reader, Result, Writer};
 use crate::ChunkPointer;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct SizedPointer {

@@ -1,4 +1,5 @@
 //! Tools for working directly with objects, without the indexing system.
+
 use crate::{
     backends::BackendError,
     compress::{CompressError, DecompressError},

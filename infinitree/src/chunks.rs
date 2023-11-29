@@ -1,5 +1,6 @@
 use crate::crypto::{Digest, Tag};
 use crate::object::ObjectId;
+use serde::{Deserialize, Serialize};
 use std::mem::size_of;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]

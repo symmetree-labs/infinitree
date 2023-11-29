@@ -1,5 +1,6 @@
 use super::{AEADReader, BlockBuffer, PoolRef, Reader, Writer};
 use crate::{chunks::ChunkPointer, ObjectId};
+use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
 /// Smaller chunks will lower the storage overhead, achieving lowerhead.

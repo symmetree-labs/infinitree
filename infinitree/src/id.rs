@@ -1,5 +1,6 @@
 use crate::crypto::{Digest, SecureRandom};
 pub use hex::FromHexError;
+use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, str::FromStr, string::ToString};
 
 /// Unique identifier for a persistence object.

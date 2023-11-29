@@ -42,7 +42,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.0.update(key.borrow(), fun)
+        self.0.update(key, fun)
     }
 
     /// Call the given function to insert a value if it doesn't exist.
@@ -91,10 +91,12 @@ where
 
     /// Call the function for all additive keys.
     #[inline(always)]
-    pub fn for_each(&self, mut callback: impl FnMut(&K, &mut Arc<V>)) {
-        self.0.for_each(|k, v| {
-            (callback)(k, v);
-        });
+    pub fn for_each(&self, mut callback: impl FnMut(&K, &Arc<V>)) {
+        let mut current = self.0.first_entry();
+        while let Some(entry) = current {
+            (callback)(entry.key(), entry.get());
+            current = entry.next();
+        }
     }
 
     /// Returns the number of keys.

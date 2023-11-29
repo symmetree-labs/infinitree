@@ -1,5 +1,5 @@
 use crate::Id;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::{sync::Arc, time::SystemTime};
 

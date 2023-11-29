@@ -172,9 +172,6 @@
 #[cfg(any(test, doctest, bench))]
 use criterion as _;
 
-#[macro_use]
-extern crate serde_derive;
-
 pub mod backends;
 mod chunks;
 mod compress;

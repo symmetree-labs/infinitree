@@ -94,19 +94,18 @@ where
                 result
             })));
 
-            self.active
-                .upsert_async(
-                    key,
-                    || handle.clone(),
-                    |_, v| {
-                        if let Some(handle) = v.as_ref() {
-                            handle.abort();
-                        }
+            match self.active.entry_async(key).await {
+                scc::hash_map::Entry::Occupied(mut entry) => {
+                    if let Some(handle) = entry.get().as_ref() {
+                        handle.abort();
+                    }
 
-                        *v = handle.clone();
-                    },
-                )
-                .await;
+                    *entry.get_mut() = handle.clone();
+                }
+                scc::hash_map::Entry::Vacant(entry) => {
+                    entry.insert_entry(handle);
+                }
+            }
         })
     }
 }

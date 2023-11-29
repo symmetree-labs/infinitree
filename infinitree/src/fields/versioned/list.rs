@@ -8,7 +8,7 @@ use crate::{
     object::{self, serializer::SizedPointer, ObjectError},
 };
 use scc::{
-    ebr::{Arc as SCCArc, AtomicArc, Barrier, Ptr, Tag},
+    ebr::{AtomicShared, Guard, Ptr, Shared, Tag},
     LinkedList as SCCLinkedList,
 };
 use std::{
@@ -16,58 +16,51 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
-#[derive(Default)]
-pub struct Node<T: 'static>(AtomicArc<Node<T>>, T);
+#[derive(Clone, Default)]
+pub struct Node<T: 'static>(AtomicShared<Node<T>>, T);
 impl<T: 'static> SCCLinkedList for Node<T> {
-    fn link_ref(&self) -> &AtomicArc<Node<T>> {
+    fn link_ref(&self) -> &AtomicShared<Node<T>> {
         &self.0
     }
 }
 
 #[allow(unused)]
 impl<T: 'static> Node<T> {
-    fn set_next(&self, next: SCCArc<Node<T>>, barrier: &Barrier) {
+    fn set_next(&self, next: Shared<Node<T>>, barrier: &Guard) {
         let _ = self.push_back(next, false, Ordering::Release, barrier);
     }
 
     fn insert(&self, value: impl Into<T>) {
-        let barrier = Barrier::new();
-        self.set_next(SCCArc::new(Node(AtomicArc::null(), value.into())), &barrier);
+        let barrier = Guard::new();
+        self.set_next(
+            Shared::new(Node(AtomicShared::null(), value.into())),
+            &barrier,
+        );
     }
 
     pub fn is_last(&self) -> bool {
         self.0.is_null(Ordering::Acquire)
     }
 
-    fn next(&self) -> Option<SCCArc<Node<T>>> {
-        let barrier = Barrier::new();
-        self.0.load(Ordering::Acquire, &barrier).get_arc()
+    fn next(&self) -> Option<Shared<Node<T>>> {
+        let barrier = Guard::new();
+        self.0.load(Ordering::Acquire, &barrier).get_shared()
     }
 }
 
 #[derive(Default)]
 struct NodeIter<T: 'static> {
-    first: bool,
-    current: Option<SCCArc<Node<Arc<T>>>>,
+    current: Option<Shared<Node<Arc<T>>>>,
 }
 
 impl<T: 'static> Iterator for NodeIter<T> {
     type Item = Arc<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.first {
-            self.first = false;
-            return self.current.as_ref().map(|n| n.1.clone());
-        }
+        let value = self.current.as_ref().map(|node| node.1.clone());
+        self.current = self.current.as_deref().and_then(Node::next);
 
-        let next = self.current.as_ref().and_then(|n| n.next());
-        match next {
-            Some(ref node) => {
-                self.current = next.clone();
-                Some(node.1.clone())
-            }
-            None => None,
-        }
+        value
     }
 }
 
@@ -81,19 +74,19 @@ impl<T: 'static> Deref for Node<Arc<T>> {
 }
 
 struct LinkedListInner<T: 'static> {
-    last: AtomicArc<Node<Arc<T>>>,
-    commit_start: AtomicArc<Node<Arc<T>>>,
-    previous_commit_last: AtomicArc<Node<Arc<T>>>,
-    first: AtomicArc<Node<Arc<T>>>,
+    last: AtomicShared<Node<Arc<T>>>,
+    commit_start: AtomicShared<Node<Arc<T>>>,
+    previous_commit_last: AtomicShared<Node<Arc<T>>>,
+    first: AtomicShared<Node<Arc<T>>>,
 }
 
 impl<T: 'static> Default for LinkedListInner<T> {
     fn default() -> Self {
         Self {
-            last: AtomicArc::null(),
-            commit_start: AtomicArc::null(),
-            previous_commit_last: AtomicArc::null(),
-            first: AtomicArc::null(),
+            last: AtomicShared::null(),
+            commit_start: AtomicShared::null(),
+            previous_commit_last: AtomicShared::null(),
+            first: AtomicShared::null(),
         }
     }
 }
@@ -101,13 +94,13 @@ impl<T: 'static> Default for LinkedListInner<T> {
 /// Append-only linked list that only commits incremental changes
 #[derive(Clone)]
 pub struct LinkedList<T: 'static> {
-    inner: SCCArc<LinkedListInner<T>>,
+    inner: Shared<LinkedListInner<T>>,
 }
 
 impl<T: 'static> Default for LinkedList<T> {
     fn default() -> Self {
         Self {
-            inner: SCCArc::new(LinkedListInner::default()),
+            inner: Shared::new(LinkedListInner::default()),
         }
     }
 }
@@ -127,8 +120,8 @@ impl<T: 'static> LinkedList<T> {
     ///
     /// ```
     pub fn push(&self, value: impl Into<Arc<T>>) {
-        let node = SCCArc::new(Node(AtomicArc::default(), value.into()));
-        let barrier = Barrier::new();
+        let node = Shared::new(Node(AtomicShared::default(), value.into()));
+        let barrier = Guard::new();
 
         let _ = self
             .inner
@@ -150,7 +143,7 @@ impl<T: 'static> LinkedList<T> {
                 )
             });
 
-        let barrier = Barrier::new();
+        let barrier = Guard::new();
         let ptr = self.inner.last.load(Ordering::Acquire, &barrier);
         self.inner
             .last
@@ -185,7 +178,7 @@ impl<T: 'static> LinkedList<T> {
     ///
     /// ```
     pub fn first_in_commit(&self) -> Option<Arc<T>> {
-        let barrier = Barrier::new();
+        let barrier = Guard::new();
         self.inner
             .commit_start
             .load(Ordering::Acquire, &barrier)
@@ -210,7 +203,7 @@ impl<T: 'static> LinkedList<T> {
     /// assert_eq!(list.first(), Some(123456.into()));
     /// ```
     pub fn first(&self) -> Option<Arc<T>> {
-        let barrier = Barrier::new();
+        let barrier = Guard::new();
         self.inner
             .first
             .load(Ordering::Acquire, &barrier)
@@ -234,7 +227,7 @@ impl<T: 'static> LinkedList<T> {
     /// assert_eq!(list.last(), Some(111111.into()));
     /// ```
     pub fn last(&self) -> Option<Arc<T>> {
-        let barrier = Barrier::new();
+        let barrier = Guard::new();
         self.inner
             .last
             .load(Ordering::Acquire, &barrier)
@@ -264,8 +257,12 @@ impl<T: 'static> LinkedList<T> {
     /// assert_eq!(list.first_in_commit(), Some(654321.into()));
     /// ```
     pub fn commit(&self) {
-        let barrier = Barrier::new();
-        let last = self.inner.last.load(Ordering::SeqCst, &barrier).get_arc();
+        let barrier = Guard::new();
+        let last = self
+            .inner
+            .last
+            .load(Ordering::SeqCst, &barrier)
+            .get_shared();
         self.inner
             .commit_start
             .swap((None, Tag::None), Ordering::SeqCst);
@@ -330,12 +327,12 @@ impl<T: 'static> LinkedList<T> {
     /// assert_eq!(list.last(), Some(111111.into()));
     /// ```
     pub fn rollback(&self) {
-        let barrier = Barrier::new();
+        let barrier = Guard::new();
         let last = self
             .inner
             .previous_commit_last
             .load(Ordering::SeqCst, &barrier)
-            .get_arc();
+            .get_shared();
         self.inner.last.swap((last, Tag::None), Ordering::SeqCst);
         self.inner
             .commit_start
@@ -343,10 +340,13 @@ impl<T: 'static> LinkedList<T> {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = Arc<T>> {
-        let barrier = Barrier::new();
+        let barrier = Guard::new();
         NodeIter {
-            first: true,
-            current: self.inner.first.load(Ordering::Acquire, &barrier).get_arc(),
+            current: self
+                .inner
+                .first
+                .load(Ordering::Acquire, &barrier)
+                .get_shared(),
         }
     }
 }
@@ -470,8 +470,12 @@ mod test {
 
     type TestList = LinkedList<usize>;
     fn init_list(store: &TestList) {
+        store.push(123454321);
+        store.push(123456791);
+        store.commit();
         store.push(123456790);
         store.push(987654321);
+        assert_eq!(store.iter().count(), 4);
     }
 
     crate::len_check_test!(TestList, LocalField, init_list, |l: TestList| {
