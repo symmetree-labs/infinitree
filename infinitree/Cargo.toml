@@ -23,16 +23,16 @@ _test = ["test"]
 
 [dependencies]
 blake3 = "1.5.0"
-ring = "0.16.20"
+ring = "0.17.6"
 rust-argon2 = "1.0.1"
-libsodium-sys-stable = { version = "1.20.3", features = ["minimal", "optimized"], optional = true }
+libsodium-sys-stable = { version = "1.20.4", features = ["minimal", "optimized"], optional = true }
 yubico_manager = { version = "0.9.0", optional = true }
 
 lz4_flex = { version = "0.11.1", default-features = false, features = ["safe-decode", "frame"] }
 
 scc = "2.0.4"
-flume = "0.10.14"
-lru = "0.10.1"
+flume = "0.11.0"
+lru = "0.12.1"
 thiserror = "1.0.50"
 anyhow = "1.0.75"
 hex = "0.4.3"
@@ -46,7 +46,7 @@ secrecy = "0.8.0"
 
 infinitree-macros = { version = "0.10.0", path = "../infinitree-macros" }
 
-memmap2 = { version = "0.7.1", optional = true }
+memmap2 = { version = "0.9.0", optional = true }
 
 [dev-dependencies]
 criterion = "0.5.1"

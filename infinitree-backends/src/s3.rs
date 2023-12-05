@@ -249,15 +249,11 @@ impl Backend for S3 {
 mod test {
     use super::S3;
     use crate::test::{write_and_wait_for_commit, TEST_DATA_DIR};
-    use hyper::service::make_service_fn;
     use hyper::Server;
     use infinitree::{backends::Backend, object::WriteObject, ObjectId};
     use s3s::{auth::SimpleAuth, service::S3ServiceBuilder};
     use s3s_fs::FileSystem;
-    use std::{
-        future,
-        net::{SocketAddr, TcpListener},
-    };
+    use std::net::{SocketAddr, TcpListener};
     use tokio::task;
 
     const AWS_ACCESS_KEY_ID: &str = "MEEMIEW3EEKI8IEY1U";
@@ -280,10 +276,8 @@ mod test {
         };
 
         let server = {
-            let service = service.into_shared();
+            let make_service = service.into_shared().into_make_service();
             let listener = TcpListener::bind(addr).unwrap();
-            let make_service: _ =
-                make_service_fn(move |_| future::ready(Ok::<_, anyhow::Error>(service.clone())));
             Server::from_tcp(listener).unwrap().serve(make_service)
         };
 
