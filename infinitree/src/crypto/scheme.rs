@@ -268,9 +268,8 @@ mod test {
 
         // crate a tree and put some data into it
         {
-            let mut tree =
-                Infinitree::<VersionedMap<usize, usize>>::empty(storage.clone(), old_key())
-                    .unwrap();
+            let tree = Infinitree::<VersionedMap<usize, usize>>::empty(storage.clone(), old_key())
+                .unwrap();
             tree.index().insert(1000, 1000);
             tree.commit(None).unwrap();
             tree.index().clear();
@@ -285,7 +284,7 @@ mod test {
         // change the key and reseal
         {
             let key = ChangeHeaderKey::swap_on_seal(old_key(), new_key());
-            let mut tree =
+            let tree =
                 Infinitree::<VersionedMap<usize, usize>>::open(storage.clone(), key).unwrap();
             tree.reseal().unwrap();
         }

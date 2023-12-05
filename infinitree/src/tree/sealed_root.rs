@@ -126,7 +126,7 @@ where
 }
 
 pub(crate) fn commit<CustomData>(
-    index: &mut RootIndex<CustomData>,
+    index: &RootIndex<CustomData>,
     backend: Arc<dyn Backend>,
 ) -> Result<()>
 where

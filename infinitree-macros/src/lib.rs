@@ -121,14 +121,14 @@ mod tests {
             }
         }
         impl<T> ::infinitree::Index for TestStruct<T> {
-            fn store_all(&'_ mut self) -> ::infinitree::anyhow::Result<Vec<::infinitree::fields::Intent<Box<dyn ::infinitree::fields::Store>>>> {
+            fn store_all(&'_ self) -> ::infinitree::anyhow::Result<Vec<::infinitree::fields::Intent<Box<dyn ::infinitree::fields::Store>>>> {
                 Ok(vec![
                     self.unattributed().into(),
                     self.renamed_chunks().into(),
                     self.strategizing().into(),
                 ])
             }
-            fn load_all(&'_ mut self) -> ::infinitree::anyhow::Result<Vec<::infinitree::fields::Intent<Box<dyn ::infinitree::fields::Load>>>> {
+            fn load_all(&'_ self) -> ::infinitree::anyhow::Result<Vec<::infinitree::fields::Intent<Box<dyn ::infinitree::fields::Load>>>> {
                 Ok(vec![
                     self.unattributed().into(),
                     self.renamed_chunks().into(),

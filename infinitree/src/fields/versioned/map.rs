@@ -613,14 +613,14 @@ where
     K: Key + Clone,
     V: Value,
 {
-    fn store_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Store>>>> {
+    fn store_all(&self) -> anyhow::Result<Vec<Intent<Box<dyn Store>>>> {
         Ok(vec![Intent::new(
             "root",
             Box::new(LocalField::for_field(self)),
         )])
     }
 
-    fn load_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Load>>>> {
+    fn load_all(&self) -> anyhow::Result<Vec<Intent<Box<dyn Load>>>> {
         Ok(vec![Intent::new(
             "root",
             Box::new(LocalField::for_field(self)),
@@ -647,7 +647,7 @@ mod test {
         let storage = crate::backends::test::InMemoryBackend::shared();
 
         {
-            let mut tree =
+            let tree =
                 Infinitree::<VersionedMap<usize, usize>>::empty(storage.clone(), key()).unwrap();
             tree.index().insert(1000, 1000);
             tree.commit(None).unwrap();

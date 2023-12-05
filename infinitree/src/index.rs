@@ -85,12 +85,12 @@ pub trait Index: Send + Sync {
     /// Generate an [`Intent`] wrapper for each field in the `Index`.
     ///
     /// You should normally use the [`Index`](derive@crate::Index) derive macro to generate this.
-    fn store_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Store>>>>;
+    fn store_all(&self) -> anyhow::Result<Vec<Intent<Box<dyn Store>>>>;
 
     /// Generate an [`Intent`] wrapper for each field in the `Index`.
     ///
     /// You should normally use the [`Index`](derive@crate::Index) derive macro to generate this.
-    fn load_all(&mut self) -> anyhow::Result<Vec<Intent<Box<dyn Load>>>>;
+    fn load_all(&self) -> anyhow::Result<Vec<Intent<Box<dyn Load>>>>;
 }
 
 /// Allows serializing individual records of an infinite collection.
@@ -152,7 +152,7 @@ pub(crate) trait IndexExt: Index {
     }
 
     fn commit<W: Writer + Send + Sync>(
-        &mut self,
+        &self,
         sink: &mut BufferedSink<W>,
         object: &mut dyn Writer,
         mut hashed_data: Vec<u8>,

@@ -48,7 +48,7 @@ where
     backend: Arc<dyn Backend>,
 
     /// These are the generations we're currently working on.
-    commit_filter: CommitFilter,
+    commit_filter: RwLock<CommitFilter>,
 
     /// Pool for object readers
     reader_pool: Pool<AEADReader>,
@@ -115,7 +115,7 @@ where
             reader_pool,
             backend: backend.clone(),
             index: I::default().into(),
-            commit_filter: CommitFilter::default(),
+            commit_filter: Default::default(),
         })
     }
 }
@@ -151,10 +151,7 @@ where
     /// let message = "this is a string".to_string();
     /// tree.commit(message);
     /// ```
-    pub fn commit(
-        &mut self,
-        message: impl Into<Message>,
-    ) -> Result<Option<Arc<Commit<CustomData>>>> {
+    pub fn commit(&self, message: impl Into<Message>) -> Result<Option<Arc<Commit<CustomData>>>> {
         let metadata = CommitMetadata {
             time: SystemTime::now(),
             message: message.into().into(),
@@ -187,7 +184,7 @@ where
             backend: backend.clone(),
             index: index.into(),
             root: RootIndex::uninitialized(key),
-            commit_filter: CommitFilter::default(),
+            commit_filter: Default::default(),
             reader_pool: Pool::with_constructor(0, move || {
                 AEADReader::new(backend.clone(), chunk_key.clone())
             }),
@@ -198,8 +195,8 @@ where
     ///
     /// Will return an error if the operation is not supported by
     /// either the new or the old key.
-    pub fn reseal(&mut self) -> Result<()> {
-        sealed_root::commit(&mut self.root, self.backend.clone())?;
+    pub fn reseal(&self) -> Result<()> {
+        sealed_root::commit(&self.root, self.backend.clone())?;
         Ok(())
     }
 
@@ -211,15 +208,15 @@ where
     /// Only run persistence query operations
     /// ([`query`][Infinitree::query], [`load`][Infinitree::load],
     /// [`iter`][Infinitree::iter]) on the selected generations.
-    pub fn filter_commits(&mut self, version: CommitFilter) {
-        self.commit_filter = version;
+    pub fn filter_commits(&self, version: CommitFilter) {
+        *self.commit_filter.write() = version;
     }
 
     /// Commit changes currently in the index.
     ///
     /// For full documentation, please read [`Infinitree::commit`].
     pub fn commit_with_custom_data(
-        &mut self,
+        &self,
         message: impl Into<Message>,
         mode: CommitMode,
         custom_data: CustomData,
@@ -238,7 +235,7 @@ where
     ///
     /// For full documentation, please read [`Infinitree::commit`].
     pub fn commit_with_metadata(
-        &mut self,
+        &self,
         metadata: CommitMetadata<CustomData>,
         mode: CommitMode,
     ) -> Result<Option<Arc<Commit<CustomData>>>> {
@@ -274,7 +271,7 @@ where
                 .push(Commit { id, metadata }.into());
         }
 
-        sealed_root::commit(&mut self.root, self.backend.clone())?;
+        sealed_root::commit(&self.root, self.backend.clone())?;
 
         Ok(self.last_commit())
     }
@@ -418,7 +415,7 @@ where
             .collect::<HashMap<_, _>>();
 
         let mut list = vec![];
-        let mut next = match &self.commit_filter {
+        let mut next = match &*self.commit_filter.read() {
             // If we're just looking for a single commit, job's done
             CommitFilter::Single(id) => return Some(vec![commits.get(id)?.id]),
 
@@ -427,10 +424,11 @@ where
             CommitFilter::Range(_start, end) => commits.get(end),
         };
 
+        let filter = self.commit_filter.read();
         while let Some(current) = next {
             list.push(current.id);
 
-            next = match &self.commit_filter {
+            next = match &*filter {
                 CommitFilter::Range(start, _end) if &current.id == start => return Some(list),
                 CommitFilter::Single(_) => unreachable!(),
 
@@ -510,7 +508,7 @@ mod tests {
     fn test_tree_with_multiple_commits() -> Arc<InMemoryBackend> {
         let backend = InMemoryBackend::shared();
         {
-            let mut tree =
+            let tree =
                 Infinitree::<VersionedMap<String, String>>::empty(backend.clone(), key()).unwrap();
 
             tree.load_all().unwrap();
@@ -518,7 +516,7 @@ mod tests {
             tree.commit(None).unwrap().unwrap();
         }
         {
-            let mut tree =
+            let tree =
                 Infinitree::<VersionedMap<String, String>>::open(backend.clone(), key()).unwrap();
 
             tree.load_all().unwrap();
@@ -566,8 +564,7 @@ mod tests {
         let backend = test_tree_with_multiple_commits();
 
         {
-            let mut tree =
-                Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
+            let tree = Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
             let commit = tree.commit_list().first().unwrap().id;
             tree.filter_commits(super::CommitFilter::UpTo(commit));
 
@@ -581,8 +578,7 @@ mod tests {
         let backend = test_tree_with_multiple_commits();
 
         {
-            let mut tree =
-                Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
+            let tree = Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
 
             let start = tree.commit_list().first().unwrap().id;
             let end = tree.commit_list().last().unwrap().id;
@@ -599,7 +595,7 @@ mod tests {
         let backend = test_tree_with_multiple_commits();
 
         {
-            let mut tree =
+            let tree =
                 Infinitree::<VersionedMap<String, String>>::open(backend.clone(), key()).unwrap();
 
             tree.load_all().unwrap();
@@ -610,8 +606,7 @@ mod tests {
         }
 
         {
-            let mut tree =
-                Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
+            let tree = Infinitree::<VersionedMap<String, String>>::open(backend, key()).unwrap();
 
             let commit = tree.commit_list().get(1).unwrap().id;
             tree.filter_commits(super::CommitFilter::Single(commit));
