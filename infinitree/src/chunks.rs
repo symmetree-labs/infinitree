@@ -119,7 +119,7 @@ impl ChunkPointer {
     }
 
     #[inline(always)]
-    pub(crate) fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.0.size as usize
     }
 
