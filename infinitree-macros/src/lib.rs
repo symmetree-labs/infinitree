@@ -1,5 +1,12 @@
-#![forbid(unsafe_code)]
+#![forbid(unsafe_code, unused_crate_dependencies)]
 #![deny(clippy::all)]
+
+// these are used in generated code, so tests will fail unless we have
+// them
+#[cfg(test)]
+use infinitree as _;
+#[cfg(test)]
+use serde as _;
 
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, DeriveInput};

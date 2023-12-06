@@ -172,26 +172,26 @@
 #[cfg(any(test, doctest, bench))]
 use criterion as _;
 
-pub mod backends;
 mod chunks;
 mod compress;
+mod id;
+
+pub mod backends;
 pub mod crypto;
 pub mod fields;
-mod id;
 pub mod index;
 pub mod object;
 pub mod tree;
 
+pub use crate::chunks::ChunkPointer;
+pub use crate::crypto::{Digest, Hasher, Key};
+pub use crate::index::Index;
+pub use crate::object::ObjectId;
+pub use crate::tree::Infinitree;
 pub use anyhow;
-pub use chunks::ChunkPointer;
-pub use crypto::{Digest, Hasher, Key};
-pub use index::Index;
-pub use infinitree_macros::Index;
-pub use object::ObjectId;
-pub use tree::Infinitree;
 
-pub(crate) use backends::Backend;
-pub(crate) use id::Id;
+use backends::Backend;
+use id::Id;
 
 use rmp_serde::decode::from_slice as deserialize_from_slice;
 use rmp_serde::encode::write as serialize_to_writer;
@@ -200,6 +200,8 @@ use rmp_serde::Deserializer;
 
 /// Size of a storage object unit.
 pub const BLOCK_SIZE: usize = 4 * 1024 * 1024;
+
+pub use infinitree_macros::Index;
 
 #[cfg(test)]
 const TEST_DATA_DIR: &str = "../test_data";

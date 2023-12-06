@@ -3,9 +3,7 @@
 use proc_macro2::{Span, TokenStream};
 use proc_macro_crate::{crate_name, FoundCrate};
 use quote::quote;
-use syn::{
-    Attribute, Data, DataStruct, DeriveInput, Field, Fields, Ident, Lit, LitStr, Meta, NestedMeta,
-};
+use syn::{Data, DataStruct, DeriveInput, Field, Fields, Ident, Lit, LitStr, Type};
 
 struct StructField {
     field: Field,
@@ -14,7 +12,7 @@ struct StructField {
     strategy: TokenStream,
 }
 
-pub(crate) fn crate_name_token() -> TokenStream {
+pub fn crate_name_token() -> TokenStream {
     let rustdoc =
         std::env::var("RUSTDOC_TEST_LINE").or_else(|_| std::env::var("UNSTABLE_RUSTDOC_TEST_LINE"));
     if rustdoc.is_ok() {
@@ -31,10 +29,7 @@ pub(crate) fn crate_name_token() -> TokenStream {
     }
 }
 
-pub(crate) fn expand(
-    infinitree_crate: TokenStream,
-    input: DeriveInput,
-) -> syn::Result<TokenStream> {
+pub fn expand(infinitree_crate: TokenStream, input: DeriveInput) -> syn::Result<TokenStream> {
     let fields = match input.data {
         Data::Struct(DataStruct {
             fields: Fields::Named(fields),
@@ -49,7 +44,7 @@ pub(crate) fn expand(
             let field = f
                 .attrs
                 .iter()
-                .filter(|attr| attr.path.is_ident("infinitree"))
+                .filter(|attr| attr.path().is_ident("infinitree"))
                 .fold(
                     StructField {
                         field: f.clone(),
@@ -58,17 +53,27 @@ pub(crate) fn expand(
                         strategy: quote! ( #infinitree_crate::fields::LocalField ),
                     },
                     |mut field, attr| {
-                        if let Ok(Some(rename)) = get_name_attr(attr) {
-                            field.rename = rename.to_string();
-                        }
+                        attr.parse_nested_meta(|meta| {
+                            if meta.path.is_ident("name") {
+                                field.rename = meta.value()?.parse::<LitStr>()?.value();
+                                return Ok(());
+                            }
 
-                        if let Ok(Some(strategy)) = get_strategy_attr(attr) {
-                            field.strategy = quote!( #strategy );
-                        }
+                            if meta.path.is_ident("skip") {
+                                field.skip = true;
+                                return Ok(());
+                            }
 
-                        if let Ok(true) = should_skip(attr) {
-                            field.skip = true;
-                        }
+                            if meta.path.is_ident("strategy") {
+                                let strategy: Type =
+                                    syn::parse_str(&meta.value()?.parse::<LitStr>()?.value())?;
+                                field.strategy = quote!( #strategy );
+                                return Ok(());
+                            }
+
+                            Err(meta.error("unrecognized repr"))
+                        })
+                        .expect("bad attributes");
 
                         field
                     },
@@ -147,81 +152,4 @@ pub(crate) fn expand(
         }
         })
     }
-}
-
-fn get_attr(attr: &Attribute) -> syn::Result<Option<NestedMeta>> {
-    let meta = attr.parse_meta()?;
-    let meta_list = match meta {
-        Meta::List(list) => list,
-        _ => {
-            return Err(syn::Error::new_spanned(
-                meta,
-                "expected a list-style attribute",
-            ))
-        }
-    };
-
-    match meta_list.nested.len() {
-        // `#[stash()]` without any arguments is a no-op
-        0 => Ok(None),
-        1 => Ok(Some(meta_list.nested[0].clone())),
-        _ => Err(syn::Error::new_spanned(
-            meta_list.nested,
-            "currently only a single stash attribute is supported",
-        )),
-    }
-}
-
-fn get_strategy_attr(attr: &Attribute) -> syn::Result<Option<syn::Type>> {
-    let name_value = match get_attr(attr)? {
-        Some(NestedMeta::Meta(Meta::NameValue(nv))) => nv,
-        _ => return Ok(None),
-    };
-
-    if !name_value.path.is_ident("strategy") {
-        return Err(syn::Error::new_spanned(
-            &name_value.path,
-            "unsupported attribute; expected `strategy`",
-        ));
-    }
-
-    match &name_value.lit {
-        Lit::Str(s) => syn::parse_str(&s.value())
-            .map(Some)
-            .map_err(|e| syn::Error::new_spanned(s, e)),
-        lit => Err(syn::Error::new_spanned(lit, "")),
-    }
-}
-
-fn get_name_attr(attr: &Attribute) -> syn::Result<Option<Ident>> {
-    let name_value = match get_attr(attr)? {
-        Some(NestedMeta::Meta(Meta::NameValue(nv))) => nv,
-        _ => return Ok(None),
-    };
-
-    if !name_value.path.is_ident("name") {
-        return Err(syn::Error::new_spanned(
-            &name_value.path,
-            "unsupported attribute; expected `name`",
-        ));
-    }
-
-    match &name_value.lit {
-        Lit::Str(s) => syn::parse_str(&s.value()).map_err(|e| syn::Error::new_spanned(s, e)),
-        lit => Err(syn::Error::new_spanned(lit, "")),
-    }
-}
-
-fn should_skip(attr: &Attribute) -> syn::Result<bool> {
-    let skip_value = match get_attr(attr) {
-        Ok(Some(NestedMeta::Meta(Meta::Path(path)))) => path,
-        _ => {
-            return Err(syn::Error::new_spanned(
-                attr,
-                "unexpected attribute; expected `skip`",
-            ))
-        }
-    };
-
-    Ok(skip_value.is_ident("skip"))
 }
