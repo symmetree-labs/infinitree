@@ -1,3 +1,4 @@
+/.direnv
 Cargo.lock
 /target
 /test_data

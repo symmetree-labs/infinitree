@@ -109,36 +109,17 @@ mod private {
         where
             Self: Sized + 'static,
         {
-            match self.open_root(header.clone()) {
-                Ok(open) => {
-                    let (pos, root_ptr) = RawChunkPointer::parse(&open);
-                    let convergence = internal.read_key(&open[pos..]);
+            let open = self.open_root(header.clone())?;
+            let (pos, root_ptr) = RawChunkPointer::parse(&open);
+            let convergence = internal.read_key(&open[pos..]);
 
-                    Ok((
-                        root_ptr,
-                        KeyingScheme {
-                            header: self,
-                            convergence,
-                        },
-                    ))
-                }
-                Err(_) => {
-                    // open and transparently upgrade unsafe header format to this
-                    let old_key = super::symmetric08::Key::from_credentials(
-                        self.username.clone(),
-                        self.password.clone(),
-                    )?;
-                    let (root_ptr, ops) = old_key.open_root(header)?;
-
-                    Ok((
-                        root_ptr,
-                        KeyingScheme {
-                            header: self,
-                            convergence: Arc::new(MixedScheme { ops }),
-                        },
-                    ))
-                }
-            }
+            Ok((
+                root_ptr,
+                KeyingScheme {
+                    header: self,
+                    convergence,
+                },
+            ))
         }
 
         fn seal_root(&self, open: OpenHeader) -> Result<SealedHeader> {
@@ -196,36 +177,8 @@ mod private {
         }
     }
 
-    pub struct MixedScheme {
-        pub(super) ops: super::symmetric08::Key,
-    }
-
-    impl InternalScheme for MixedScheme {
-        fn chunk_key(&self) -> Result<ChunkKey> {
-            self.ops.chunk_key()
-        }
-
-        fn index_key(&self) -> Result<IndexKey> {
-            self.ops.index_key()
-        }
-
-        fn storage_key(&self) -> Result<StorageKey> {
-            self.chunk_key().map(|ck| StorageKey(ck.0))
-        }
-
-        fn read_key(&self, _raw_head: &[u8]) -> InternalKey {
-            unreachable!()
-        }
-
-        fn write_key(&self, raw_head: &mut [u8]) -> usize {
-            let output = Mode::Mixed08.write_to(raw_head);
-            1 + self.ops.master_key().write_to(output)
-        }
-    }
-
     #[derive(Copy, Clone)]
     pub(super) enum Mode {
-        Mixed08 = 0,
         Symmetric = 1,
     }
 
@@ -236,7 +189,6 @@ mod private {
             use Mode::*;
 
             match value {
-                0 => Ok(Mixed08),
                 1 => Ok(Symmetric),
                 _ => Err(CryptoError::Fatal),
             }
@@ -250,9 +202,6 @@ mod private {
 
             match mode {
                 Mode::Symmetric => Arc::new(Symmetric::new(k)),
-                Mode::Mixed08 => Arc::new(MixedScheme {
-                    ops: super::symmetric08::Key::with_key(k),
-                }),
             }
         }
 
@@ -434,76 +383,6 @@ mod test {
             || UsernamePassword::with_credentials("test".to_string(), "test".to_string()).unwrap();
         let header = key().header.seal_root(Default::default()).unwrap();
         let _ = key().header.open_root(header).unwrap();
-    }
-
-    #[test]
-    fn userpass_backwards_compat_root_address() {
-        let userpass =
-            UsernamePassword::with_credentials("test".to_string(), "test".to_string()).unwrap();
-
-        let symmetric08 = super::super::symmetric08::Key::from_credentials(
-            "test".to_string().into(),
-            "test".to_string().into(),
-        )
-        .unwrap();
-
-        assert_eq!(
-            userpass.header.root_object_id().unwrap(),
-            symmetric08.root_object_id().unwrap()
-        );
-    }
-
-    #[test]
-    fn backwards_compat_upgrade() {
-        const TEST_08_SEALED_HEADER: SealedHeader = SealedHeader([
-            83, 42, 179, 250, 134, 126, 214, 14, 39, 162, 145, 87, 120, 248, 159, 68, 178, 171, 21,
-            15, 7, 148, 78, 146, 120, 76, 159, 242, 15, 117, 239, 112, 131, 229, 143, 152, 5, 232,
-            155, 176, 128, 17, 74, 135, 50, 103, 177, 96, 96, 143, 252, 148, 253, 220, 82, 232,
-            250, 234, 193, 73, 79, 72, 244, 254, 226, 205, 106, 142, 111, 131, 98, 246, 175, 134,
-            170, 160, 9, 235, 88, 9, 204, 61, 26, 54, 62, 232, 8, 30, 255, 46, 144, 54, 185, 126,
-            188, 95, 37, 185, 90, 161, 76, 141, 32, 30, 214, 44, 218, 86, 152, 185, 139, 223, 243,
-            32, 122, 105, 96, 161, 197, 97, 220, 228, 38, 198, 180, 137, 205, 86, 51, 13, 147, 157,
-            151, 53, 49, 255, 66, 168, 74, 119, 146, 207, 114, 227, 91, 133, 131, 201, 122, 29,
-            106, 114, 237, 6, 159, 204, 110, 251, 15, 248, 80, 170, 101, 116, 208, 215, 163, 135,
-            28, 219, 13, 225, 48, 184, 41, 145, 31, 46, 134, 48, 133, 235, 176, 217, 195, 200, 94,
-            147, 55, 230, 155, 45, 252, 59, 131, 139, 117, 64, 244, 34, 49, 252, 37, 28, 99, 86,
-            50, 161, 242, 48, 32, 222, 231, 254, 93, 23, 44, 142, 5, 53, 219, 129, 96, 78, 122, 44,
-            14, 121, 89, 86, 47, 55, 2, 76, 220, 216, 135, 141, 127, 230, 226, 206, 125, 3, 3, 139,
-            50, 122, 139, 8, 54, 22, 126, 184, 200, 209, 26, 55, 46, 214, 4, 78, 84, 52, 152, 172,
-            193, 56, 114, 231, 222, 91, 218, 2, 254, 213, 98, 252, 40, 135, 24, 231, 207, 195, 244,
-            56, 85, 252, 170, 20, 109, 175, 220, 82, 104, 117, 181, 108, 119, 61, 199, 85, 141, 47,
-            1, 228, 139, 214, 95, 89, 96, 130, 228, 153, 133, 133, 155, 201, 105, 38, 183, 126,
-            189, 88, 26, 131, 226, 242, 255, 96, 169, 118, 150, 239, 164, 66, 109, 72, 18, 204,
-            177, 253, 43, 99, 26, 241, 214, 168, 171, 208, 116, 127, 1, 223, 73, 3, 49, 180, 44,
-            214, 64, 42, 138, 232, 71, 151, 22, 157, 247, 228, 104, 190, 80, 79, 229, 164, 205,
-            144, 153, 26, 65, 143, 80, 34, 243, 172, 250, 115, 212, 52, 7, 237, 175, 198, 106, 134,
-            240, 100, 232, 42, 23, 165, 60, 42, 4, 236, 154, 235, 255, 224, 223, 57, 192, 147, 242,
-            39, 82, 234, 111, 74, 171, 84, 9, 38, 40, 150, 212, 38, 213, 44, 175, 126, 72, 112,
-            142, 89, 99, 170, 81, 168, 87, 132, 176, 50, 5, 45, 179, 32, 161, 131, 130, 89, 46,
-            149, 156, 44, 203, 147, 110, 209, 108, 127, 228, 240, 66, 179, 102, 141, 157, 4, 184,
-            98, 116, 201, 142, 57, 46, 132, 36, 228, 86, 120, 50, 44, 192, 175, 170, 164, 206, 230,
-            235, 161, 41, 86, 220, 54, 46, 167, 162, 52, 252, 218, 186, 171, 60, 43, 0, 26, 89, 32,
-            8, 198,
-        ]);
-
-        let open_key =
-            UsernamePassword::with_credentials("test".to_string(), "test".to_string()).unwrap();
-
-        let (root_ptr, key) = open_key
-            .header
-            .open_header(TEST_08_SEALED_HEADER.clone(), &Symmetric::random().unwrap())
-            .unwrap();
-        let sealed = key.seal_root(&root_ptr).unwrap();
-
-        // `symmetric08` will always produce the same header for the same data,
-        // we want to avoid re-using the same algo on sealing
-        assert_ne!(sealed, TEST_08_SEALED_HEADER);
-
-        let open_key =
-            UsernamePassword::with_credentials("test".to_string(), "test".to_string()).unwrap();
-
-        // make sure we can also re-open this
-        Arc::new(open_key).open_root(sealed).unwrap();
     }
 
     #[test]

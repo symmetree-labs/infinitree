@@ -1,16 +1,26 @@
 use super::CryptoError;
-use secrecy::{ExposeSecret, Secret};
+use secrecy::ExposeSecret;
 use std::{str::FromStr, sync::Arc};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub(super) const KEY_SIZE: usize = 32;
 
 /// A raw cryptographic key
+#[derive(Zeroize, ZeroizeOnDrop)]
+struct RawKeyInner([u8; KEY_SIZE]);
+
+impl AsRef<[u8; KEY_SIZE]> for RawKeyInner {
+    fn as_ref(&self) -> &[u8; KEY_SIZE] {
+        &self.0
+    }
+}
+
 #[derive(Clone)]
-pub struct RawKey(Arc<Secret<[u8; KEY_SIZE]>>);
+pub struct RawKey(Arc<RawKeyInner>);
 
 impl RawKey {
     pub(crate) fn new(k: [u8; KEY_SIZE]) -> Self {
-        Self(Secret::new(k).into())
+        Self(RawKeyInner(k).into())
     }
 
     pub(crate) fn write_to(&self, output: &mut [u8]) -> usize {
@@ -33,19 +43,19 @@ impl FromStr for RawKey {
 impl ToString for RawKey {
     #[inline(always)]
     fn to_string(&self) -> String {
-        hex::encode(self.0.expose_secret())
+        hex::encode(self.expose_secret())
     }
 }
 
 impl ExposeSecret<[u8; KEY_SIZE]> for RawKey {
     fn expose_secret(&self) -> &[u8; KEY_SIZE] {
-        self.0.expose_secret()
+        self.0.as_ref().as_ref()
     }
 }
 
 impl From<[u8; KEY_SIZE]> for RawKey {
     fn from(k: [u8; KEY_SIZE]) -> Self {
-        Self(Arc::new(k.into()))
+        RawKey::new(k)
     }
 }
 
@@ -54,6 +64,6 @@ impl From<&[u8]> for RawKey {
         assert!(k.len() >= KEY_SIZE);
         let mut buf = [0; KEY_SIZE];
         buf.copy_from_slice(&k[..KEY_SIZE]);
-        Self(Arc::new(buf.into()))
+        RawKey::new(buf)
     }
 }

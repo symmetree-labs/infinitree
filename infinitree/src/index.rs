@@ -201,7 +201,7 @@ pub(crate) trait IndexExt: Index {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use crate::{crypto::Digest, fields::Strategy, index::*, ChunkPointer};
+    use crate::{crypto::{Digest, Scheme}, fields::Strategy, index::*, ChunkPointer};
 
     #[macro_export]
     macro_rules! len_check_test {
@@ -229,15 +229,18 @@ pub(crate) mod test {
         use crate::{backends, crypto, object::AEADWriter};
         use std::sync::Arc;
 
-        let key = *b"abcdef1234567890abcdef1234567890";
-        let crypto = crypto::symmetric08::ObjectOperations::chunks(key.into());
+        let crypto = crypto::UsernamePassword::with_credentials("username".to_owned(), "password".to_owned()).unwrap();
         let storage = Arc::new(backends::test::InMemoryBackend::default());
 
-        let writer = || AEADWriter::new(storage.clone(), crypto::ChunkKey::new(crypto.clone()));
+        let writer = {
+            let storage = storage.clone();
+            let ck = crypto.chunk_key().unwrap();
+            move || AEADWriter::new(storage.clone(), ck.clone())
+        };
         let reader = {
             let storage = storage.clone();
-            let crypto = crypto.clone();
-            move || AEADReader::new(storage.clone(), crypto::ChunkKey::new(crypto.clone()))
+            let ck = crypto.chunk_key().unwrap();
+            move || AEADReader::new(storage.clone(), ck.clone())
         };
 
         let object = {

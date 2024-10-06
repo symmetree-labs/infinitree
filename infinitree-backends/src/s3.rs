@@ -249,12 +249,13 @@ impl Backend for S3 {
 mod test {
     use super::S3;
     use crate::test::{write_and_wait_for_commit, TEST_DATA_DIR};
-    use hyper::Server;
+    use hyper::server::conn::http1;
+    use hyper_util::rt::TokioIo;
     use infinitree::{backends::Backend, object::WriteObject, ObjectId};
     use s3s::{auth::SimpleAuth, service::S3ServiceBuilder};
     use s3s_fs::FileSystem;
-    use std::net::{SocketAddr, TcpListener};
-    use tokio::task;
+    use std::net::SocketAddr;
+    use tokio::{net::TcpListener, task};
 
     const AWS_ACCESS_KEY_ID: &str = "MEEMIEW3EEKI8IEY1U";
     const AWS_SECRET_ACCESS_KEY_ID: &str = "noh8xah2thohv7laehei2lahBuno5FameiNi";
@@ -272,13 +273,26 @@ mod test {
         let service = {
             let mut b = S3ServiceBuilder::new(fs);
             b.set_auth(auth);
-            b.build()
+            b.build().into_shared()
         };
 
         let server = {
-            let make_service = service.into_shared().into_make_service();
-            let listener = TcpListener::bind(addr).unwrap();
-            Server::from_tcp(listener).unwrap().serve(make_service)
+            let addr = addr.clone();
+            task::spawn(async move {
+                let listener = TcpListener::bind(addr).await.unwrap();
+                loop {
+                    let (tcp, _) = listener.accept().await.unwrap();
+                    let io = TokioIo::new(tcp);
+                    let service = service.clone();
+
+                    tokio::task::spawn(async move {
+                        if let Err(err) = http1::Builder::new().serve_connection(io, service).await
+                        {
+                            println!("Error serving connection: {:?}", err);
+                        }
+                    });
+                }
+            })
         };
 
         let _server_handle = task::spawn(server);

@@ -73,16 +73,15 @@
 pub use blake3::Hasher;
 use ring::aead;
 pub(crate) use ring::rand::{SecureRandom, SystemRandom};
-use secrecy::{ExposeSecret, Zeroize};
+use secrecy::{ExposeSecret, zeroize::Zeroize};
 
 mod error;
 mod header;
 mod ops;
 mod rawkey;
 mod scheme;
-mod symmetric;
-pub(crate) mod symmetric08;
 
+pub(crate) mod symmetric;
 pub(crate) use error::*;
 pub(crate) use header::*;
 pub(crate) use ops::*;
