@@ -2,7 +2,7 @@
 name = "infinitree-backends"
 authors = ["Peter Parkanyi <p@symmetree.dev>"]
 description = "Embedded, encrypted database with tiered cache -- backends"
-version = "0.10.6"
+version = "0.11.0"
 keywords = ["crypto", "database", "cache", "s3", "rocksdb"]
 categories = ["database-implementations", "concurrency", "data-structures", "algorithms", "caching"]
 homepage = "https://symmetree.dev"
@@ -16,7 +16,7 @@ rustls = ["reqwest/rustls-tls"]
 native-tls = ["reqwest/native-tls-alpn"]
 
 [dependencies]
-infinitree = { version = "0.10.0", path = "../infinitree" }
+infinitree = { version = "0.11.0", path = "../infinitree" }
 
 serde = "1.0.210"
 serde_derive = "1.0.210"
